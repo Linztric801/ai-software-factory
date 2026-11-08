@@ -520,6 +520,21 @@ class Security(FactoryTest):
         self.assertIn("A innocent.txt (symlink)", out)
         self.assertIn(".Github", out)
 
+    def test_new_file_colliding_with_a_protected_one_by_case_fails(self):
+        f = self.f
+        f.to_build(self.id)
+        wt = Path(f.load(self.id)["worktree"])
+        # Write through git's index so the new name exists even on a case-insensitive disk.
+        blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=wt, input="shadow\n",
+                              capture_output=True, text=True, env=f.env).stdout.strip()
+        f.git(wt, "update-index", "--add", "--cacheinfo", f"100644,{blob},PROTECTED.TXT")
+        f.build(self.id, files={"app.txt": "x\n"})
+        # On a case-insensitive disk both names are one file; keep git from comparing it.
+        f.git(wt, "update-index", "--skip-worktree", "PROTECTED.TXT")
+        f.ok("job", "advance", self.id, "gate")
+        out = f.run("gate", self.id).stdout
+        self.assertIn("A PROTECTED.TXT (collides with a protected file)", out)
+
     def test_adding_ci_or_agent_config_fails_the_gate(self):
         f = self.f
         f.to_build(self.id)
