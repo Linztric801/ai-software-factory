@@ -5,6 +5,8 @@
   "merge_method": "merge",
   "branch_prefix": "factory/",
   "checks": ".factory/checks.sh",
+  "theme": "cloudfest",
+  "approvers": [],
   "labels": {
     "queue": "factory",
     "needs_info": "factory:needs-info",

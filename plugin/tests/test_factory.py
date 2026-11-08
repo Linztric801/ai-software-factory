@@ -672,40 +672,122 @@ class Import(FactoryTest):
 
 
 class Dashboard(FactoryTest):
-    def test_serves_pages_and_jobs_but_nothing_outside(self):
-        import http.client
+    def serve(self, *args):
         import socket
         f = self.f
-        job_id = f.new_job()
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
-        server = subprocess.Popen([str(BIN / "party-dashboard"), str(port)], cwd=f.repo, env=f.env,
+        server = subprocess.Popen([str(BIN / "party-dashboard"), str(port), *args], cwd=f.repo, env=f.env,
                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         self.addCleanup(server.stdout.close)
         self.addCleanup(server.wait)
         self.addCleanup(server.kill)
         self.assertIn(f"http://127.0.0.1:{port}/", server.stdout.readline(), "printed once it listens")
+        return port
 
-        def get(path, host=None):
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            # sent as-is, no client-side normalisation
-            conn.request("GET", path, headers={"Host": host or f"127.0.0.1:{port}"})
-            res = conn.getresponse()
-            body = res.read()
-            conn.close()
-            return res.status, body
+    def get(self, port, path, host=None):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", path, headers={"Host": host or f"127.0.0.1:{port}"})  # sent as-is
+        res = conn.getresponse()
+        body = res.read()
+        conn.close()
+        return res.status, body
 
-        self.assertEqual(get("/dashboard.html")[0], 200)
-        self.assertEqual(get("/assets/agent-office/char_0.png")[0], 200)
-        code, body = get(f"/jobs/{job_id}/job.json")
+    def test_serves_the_page_live_regions_and_jobs_but_nothing_outside(self):
+        f = self.f
+        job_id = f.new_job()
+        port = self.serve()
+        code, body = self.get(port, "/")
+        self.assertEqual(code, 200)
+        self.assertIn(b"CloudFest AI Software Factory", body)
+        code, body = self.get(port, "/live")
+        self.assertEqual(code, 200)
+        self.assertIn("r-world", json.loads(body))
+        code, body = self.get(port, f"/jobs/{job_id}/job.json")
         self.assertEqual((code, json.loads(body)["id"]), (200, job_id))
         (f.state_dir / "config.json").write_text("{}")
-        for path in ("/../bin/party-job", "/assets/../../bin/party-job", "/jobs/../../../../etc/hosts",
-                     "/jobs/../config.json", "/jobs/%2e%2e/config.json"):
-            self.assertEqual(get(path)[0], 404, path)
-        self.assertEqual(get("/dashboard.html", host=f"localhost:{port}")[0], 200)
-        self.assertEqual(get(f"/jobs/{job_id}/job.json", host="evil.example")[0], 403, "DNS rebinding")
+        for path in ("/../bin/party-job", "/jobs/../../../../etc/hosts", "/jobs/../config.json",
+                     "/jobs/%2e%2e/config.json", "/festival.css"):
+            self.assertEqual(self.get(port, path)[0], 404, path)
+        self.assertEqual(self.get(port, "/", host=f"localhost:{port}")[0], 200)
+        self.assertEqual(self.get(port, f"/jobs/{job_id}/job.json", host="evil.example")[0], 403, "DNS rebinding")
+
+    def test_demo_mode_is_labelled_and_shows_the_bierfest_call(self):
+        port = self.serve("--demo")
+        body = self.get(port, "/")[1].decode()
+        self.assertIn('class="mock-flag">Demo<', body)
+        self.assertIn("Christian needs you at the BierFest", body)
+        self.assertIn("Yusuf and Stefan", body)
+        self.assertEqual(self.get(port, "/jobs/001-demo/job.json")[0], 404, "demo serves no job files")
+
+
+class World(unittest.TestCase):
+    """The dashboard's mapping from real job state to places, and its escaping."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(BIN.parent / "lib"))
+        import world
+        cls.world = world
+        cls.theme = world.load_theme()
+
+    def job(self, stage, **kw):
+        return {"id": f"001-{stage}", "issue": 7, "title": "A title", "stage": stage, "round": 1,
+                "pr": kw.get("pr"), "pr_url": kw.get("pr_url"), "reviews": kw.get("reviews", {}),
+                "cost_usd": 1.0, "started": "2026-11-01T00:00:00Z", "ended": None}
+
+    def where(self, *jobs, approvers=()):
+        return self.world.derive(list(jobs), {"approvers": list(approvers)}, self.theme)["agents"]
+
+    def test_every_stage_puts_its_agent_in_the_right_place(self):
+        cases = {"intake": ("intake", "masterclass", "Analysing"),
+                 "spec": ("spec", "masterclass", "Analysing"),
+                 "build": ("builder", "venue", "Working"),
+                 "gate": ("builder", "arena", "Testing"),
+                 "approve": ("approver", "venue", "Deciding"),
+                 "merging": ("approver", "venue", "Working"),
+                 "needs-human": ("approver", "beerfest", "Waiting for approval"),
+                 "needs-info": ("intake", "plaza", "Waiting for the author")}
+        for stage, (agent, zone, state) in cases.items():
+            a = self.where(self.job(stage))[agent]
+            self.assertEqual((a["zone"], a["state"]), (zone, state), stage)
+
+    def test_only_pending_reviewers_walk_to_the_arena(self):
+        a = self.where(self.job("review", reviews={"code": "PASS", "ui": "pending"}))
+        self.assertEqual(a["ui"]["zone"], "arena")
+        self.assertEqual(a["code"]["zone"], "suite")
+
+    def test_idle_agents_rest_in_the_suite_and_finished_jobs_move_nobody(self):
+        a = self.where(self.job("merged"), self.job("rejected"))
+        self.assertTrue(all(x["zone"] == "suite" and x["state"] == "Idle" for x in a.values()))
+
+    def test_a_waiting_job_outranks_running_ones(self):
+        a = self.where(self.job("approve"), self.job("needs-human"), approvers=["yusuf"])
+        self.assertEqual(a["approver"]["state"], "Waiting for approval")
+        self.assertEqual(a["approver"]["say"], "Waiting for Yusuf +1")
+        two = self.where(self.job("needs-human"), self.job("needs-human"), approvers=["yusuf", "stefan"])
+        self.assertEqual(two["approver"]["say"], "2 PRs wait for 2 people")
+
+    def test_untrusted_titles_are_escaped_everywhere(self):
+        evil = self.job("needs-human", pr=5, pr_url="https://example.com/5")
+        evil["title"] = '<img src=x onerror=alert(1)>"'
+        html = self.world.page([evil], {"approvers": ["yusuf"]}, self.theme, "acme-widgets")
+        self.assertNotIn("<img src=x", html)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html)
+        live = json.dumps(self.world.regions([evil], {}, self.theme, "acme-widgets"))
+        self.assertNotIn("<img src=x", live)
+
+    def test_the_bierfest_call_appears_only_when_a_person_is_needed(self):
+        calm = self.world.regions([self.job("build")], {"approvers": ["yusuf"]}, self.theme, "p")
+        self.assertEqual(calm["r-popup"], "")
+        self.assertIn("Nobody needs you right now", calm["r-bierfest"])
+        busy = self.world.regions([self.job("needs-human", pr=9)], {"approvers": ["yusuf", "stefan"]}, self.theme, "p")
+        self.assertIn("Christian needs you at the BierFest", busy["r-popup"])
+        self.assertIn("Yusuf and Stefan", busy["r-popup"])
+        self.assertEqual(busy["r-count"], "1")
 
 
 if __name__ == "__main__":

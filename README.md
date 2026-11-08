@@ -16,8 +16,39 @@ every step is checked by code, not trust: a job moves on only when the files
 that justify the move exist, the branch passes the project's checks taken from
 its base branch, and no protected file was touched.
 
-> CloudFest After Party is an independent project, not an official CloudFest
-> product. CloudFest logos and artwork are not part of this repository.
+![The festival: every agent stands where its job really is, and Christian calls Yusuf and Stefan to the BierFest](docs/screenshots/festival.png)
+
+> CloudFest After Party is an independent project, built with permission from
+> CloudFest; it is not an official CloudFest product. The CloudFest logos and
+> the cartoon cameos of Christian Jaeger (CloudFest CEO), Yusuf and Stefan are
+> used with permission and consent; see `plugin/themes/cloudfest/ASSETS.md`.
+> Their in-world lines are invented flavour text.
+
+## The dashboard
+
+```
+party-dashboard            the festival for the project you're in, on http://127.0.0.1:8765/
+party-dashboard --demo     the same, with clearly labelled sample data
+```
+
+Every agent stands where its job really is, and moves only when a job moves:
+intake and spec in the Masterclasses, the builder at its project's booth,
+checks and reviews in the Build arena, idle agents up in the presidential
+suite. White speech bubbles report real state; tinted ones are flavour, and a
+switch turns them off. Hover over anyone to see who they are.
+
+When the approver escalates a PR to a person, the host calls them to the
+BierFest: "A beer is waiting for your review!" Closing that call approves
+nothing.
+
+| | |
+|---|---|
+| ![BierFest at Bubba Svens: two reviews wait for Yusuf and Stefan](docs/screenshots/bierfest.png) | ![The main stage: the factory's numbers on the LED wall](docs/screenshots/main-stage.png) |
+| ![The crew: eight agents and the people around them](docs/screenshots/crew.png) | ![The presidential suite: idle agents relax](docs/screenshots/suite.png) |
+
+Name the people who approve escalated PRs in `.factory/config.json`, for
+example `"approvers": ["yusuf", "stefan"]`; the theme's people get their
+cameo, anyone else a plain character with their name.
 
 ## Install
 

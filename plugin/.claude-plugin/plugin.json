@@ -1,7 +1,7 @@
 {
   "name": "cloudfest",
   "displayName": "CloudFest After Party",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A CloudFest-style AI software factory: agents turn GitHub issues labelled factory into reviewed pull requests, with every gate enforced by code",
   "author": { "name": "Linztric801", "url": "https://github.com/Linztric801" },
   "homepage": "https://github.com/Linztric801/ai-software-factory",

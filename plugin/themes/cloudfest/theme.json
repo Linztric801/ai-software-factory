@@ -1,0 +1,45 @@
+{
+  "name": "CloudFest",
+  "product": "CloudFest AI Software Factory",
+  "logo": "logo.svg",
+  "places": {
+    "masterclass": "Masterclasses",
+    "venue": "Main venue",
+    "arena": "Build arena",
+    "plaza": "Quest plaza",
+    "tower": "Control tower",
+    "pavilions": "Project pavilions",
+    "beerfest": "BierFest at Hotel Krønasår",
+    "beerfest_sign": "BierFest",
+    "beerfest_long": "BierFest at Bubba Svens",
+    "suite": "Presidential suite",
+    "suite_sign": "Hotel Krønasår",
+    "suite_long": "The presidential suite at Hotel Krønasår",
+    "suite_banner": "After Party at CloudFest"
+  },
+  "host": "christian",
+  "people": {
+    "christian": {
+      "name": "Christian Jaeger",
+      "role": "CloudFest CEO, BierFest host",
+      "short": "Christian",
+      "sprite": {"hair": "blond", "top": "navy", "legs": "blue", "style": "short", "acc": "peace", "eyes": "blue", "shirt": true, "beard": true}
+    },
+    "yusuf": {
+      "name": "Yusuf",
+      "role": "Owner, approver",
+      "github": "Linztric801",
+      "sprite": {"hair": "black", "top": "tan", "legs": "navy", "style": "short", "acc": "cap", "eyes": "brown", "shirt": "coral", "beard": true}
+    },
+    "stefan": {
+      "name": "Stefan",
+      "role": "Approver",
+      "sprite": {"hair": "brown", "top": "grey", "legs": "navy", "style": "short", "acc": ["cap", "glasses", "wave"], "eyes": "brown", "shirt": "black"}
+    }
+  },
+  "lines": {
+    "invite": "A beer is waiting for your review!",
+    "stage_welcome": "Welcome to the main stage!",
+    "ambient": ["After Party at CloudFest!", "Anyone joining the after-party?", "Who's ready for the next quest?", "Free for a quest!", "Waiting for the next task."]
+  }
+}

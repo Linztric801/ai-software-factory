@@ -57,7 +57,7 @@ checks script is missing, stop and tell the user to add `.factory/checks.sh`
 party-job                                      the only writer of job.json
 party-gate                                     runs the checks in a worktree → round-N/checks.md
 party-route                                    risk + surfaces → the job's agents
-party-dashboard [port]                         the dashboard on 127.0.0.1 (run it in the background)
+party-dashboard [port] [--demo]                the festival dashboard on 127.0.0.1 (run it in the background)
 party-import <old jobs folder>                 one-off: bring over the jobs of an in-repo factory
 <state>/config.json                            optional machine-local overrides
 <state>/jobs/<job-id>/job.json                 the job's state; the dashboard reads it
