@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""A stand-in for the GitHub CLI, covering exactly the calls factory/bin/* make.
+
+State is a JSON file named by FAKE_GH_STATE:
+  {"user": "owner",
+   "issues": {"<n>": {number, title, body, author, labels, state, url, comments}},
+   "prs": {"<n>": {number, url, head, state, isDraft, merged_sha}},
+   "calls": [[arg, ...], ...]}
+Every call is appended to "calls". Unknown calls exit 1, so a test fails loudly
+when a script starts using something this fake doesn't model.
+"""
+
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+STATE = os.environ["FAKE_GH_STATE"]
+
+
+def opt(args, name, default=None):
+    return args[args.index(name) + 1] if name in args else default
+
+
+def pick(obj, fields):
+    return {f: obj[f] for f in fields.split(",")}
+
+
+def fail(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def main(args):
+    with open(STATE) as f:
+        state = json.load(f)
+    state["calls"].append(args)
+    out = None
+    kind, verb = (args + ["", ""])[:2]
+    issues, prs = state["issues"], state["prs"]
+
+    if kind == "api" and verb == "user":
+        out = state["user"]
+    elif kind == "issue" and verb == "view":
+        issue = issues.get(args[2]) or fail(f"no issue {args[2]}")
+        out = json.dumps(pick(issue, opt(args, "--json")))
+    elif kind == "issue" and verb == "list":
+        label, wanted = opt(args, "--label"), opt(args, "--state")
+        rows = [pick(i, opt(args, "--json")) for i in issues.values()
+                if i["state"].lower() == wanted and label in {l["name"] for l in i["labels"]}]
+        out = json.dumps(rows)
+    elif verb == "comment":
+        body = opt(args, "--body")
+        target = issues if kind == "issue" else prs
+        item = target.get(args[2]) or fail(f"no {kind} {args[2]}")
+        item.setdefault("comments", []).append({
+            "author": {"login": state["user"]}, "body": body,
+            "createdAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")})
+    elif kind == "issue" and verb == "edit":
+        issue = issues[args[2]]
+        names = [l["name"] for l in issue["labels"]]
+        for name in (opt(args, "--add-label") or "").split(","):
+            if name and name not in names:
+                names.append(name)
+        for name in (opt(args, "--remove-label") or "").split(","):
+            if name in names:
+                names.remove(name)
+        issue["labels"] = [{"name": n} for n in names]
+    elif kind == "pr" and verb == "list":
+        head, wanted = opt(args, "--head"), opt(args, "--state").upper()
+        rows = [pick(p, opt(args, "--json")) for p in prs.values()
+                if p["head"] == head and p["state"] == wanted]
+        out = json.dumps(rows)
+    elif kind == "pr" and verb == "view":
+        pr = prs.get(args[2]) or fail(f"no PR {args[2]}")
+        out = json.dumps(pick(pr, opt(args, "--json")))
+    elif kind == "pr" and verb == "ready":
+        prs[args[2]]["isDraft"] = False
+    elif kind == "pr" and verb == "close":
+        prs[args[2]]["state"] = "CLOSED"
+    elif kind == "pr" and verb == "merge":
+        pr = prs[args[2]]
+        if pr["state"] != "OPEN":
+            fail("pull request is not open")
+        if os.environ.get("FAKE_GH_MERGE_FAILS"):
+            fail("merge blocked by the fake")
+        pr["state"], pr["merged_sha"] = "MERGED", opt(args, "--match-head-commit")
+    else:
+        fail(f"fake gh: unsupported call: {' '.join(args)}")
+
+    with open(STATE, "w") as f:
+        json.dump(state, f, indent=2)
+    if out is not None:
+        print(out)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

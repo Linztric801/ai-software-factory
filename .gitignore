@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.DS_Store
+# runtime state of a local factory install
+/local-mode/factory/jobs/
+/.worktrees/
+# brand packs and people are never part of this public repo
+/themes/*
+!/themes/default/
+/people/
