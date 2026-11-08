@@ -489,6 +489,37 @@ class Security(FactoryTest):
         super().setUp()
         self.id = self.f.new_job()
 
+    def test_lockfiles_and_registry_config_are_protected_but_not_lookalikes(self):
+        f = self.f
+        for name in ("go.sum", "uv.lock", ".npmrc"):
+            (f.repo / name).write_text("x\n")
+        f.git(f.repo, "add", "-A")
+        f.git(f.repo, "commit", "-q", "-m", "lockfiles")
+        f.git(f.repo, "push", "-q", "origin", "main")
+        f.to_build(self.id)
+        wt = Path(f.load(self.id)["worktree"])
+        (wt / "src" / "timeclock").mkdir(parents=True)
+        (wt / "apps").mkdir()
+        f.build(self.id, files={"go.sum": "y\n", "uv.lock": "y\n", ".npmrc": "registry=evil\n",
+                                "apps/.npmrc": "registry=evil\n", "src/timeclock/clock.ts": "ok\n"})
+        f.ok("job", "advance", self.id, "gate")
+        out = f.run("gate", self.id).stdout
+        for hit in ("M go.sum", "M uv.lock", "M .npmrc", "A apps/.npmrc"):
+            self.assertIn(hit, out)
+        self.assertNotIn("timeclock", out)
+
+    def test_case_variants_and_symlinks_are_caught(self):
+        import os
+        f = self.f
+        f.to_build(self.id)
+        wt = Path(f.load(self.id)["worktree"])
+        os.symlink("protected.txt", wt / "innocent.txt")
+        f.build(self.id, files={"Données.TXT": "shadow\n", ".Github": "not a folder\n"})
+        f.ok("job", "advance", self.id, "gate")
+        out = f.run("gate", self.id).stdout
+        self.assertIn("A innocent.txt (symlink)", out)
+        self.assertIn(".Github", out)
+
     def test_adding_ci_or_agent_config_fails_the_gate(self):
         f = self.f
         f.to_build(self.id)
@@ -601,9 +632,10 @@ class Dashboard(FactoryTest):
         self.addCleanup(server.kill)
         self.assertIn(f"http://127.0.0.1:{port}/", server.stdout.readline(), "printed once it listens")
 
-        def get(path):
+        def get(path, host=None):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request("GET", path)  # sent as-is, no client-side normalisation
+            # sent as-is, no client-side normalisation
+            conn.request("GET", path, headers={"Host": host or f"127.0.0.1:{port}"})
             res = conn.getresponse()
             body = res.read()
             conn.close()
@@ -613,8 +645,12 @@ class Dashboard(FactoryTest):
         self.assertEqual(get("/assets/agent-office/char_0.png")[0], 200)
         code, body = get(f"/jobs/{job_id}/job.json")
         self.assertEqual((code, json.loads(body)["id"]), (200, job_id))
-        for path in ("/../bin/party-job", "/assets/../../bin/party-job", "/jobs/../../../../etc/hosts"):
+        (f.state_dir / "config.json").write_text("{}")
+        for path in ("/../bin/party-job", "/assets/../../bin/party-job", "/jobs/../../../../etc/hosts",
+                     "/jobs/../config.json", "/jobs/%2e%2e/config.json"):
             self.assertEqual(get(path)[0], 404, path)
+        self.assertEqual(get("/dashboard.html", host=f"localhost:{port}")[0], 200)
+        self.assertEqual(get(f"/jobs/{job_id}/job.json", host="evil.example")[0], 403, "DNS rebinding")
 
 
 if __name__ == "__main__":

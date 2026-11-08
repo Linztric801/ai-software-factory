@@ -19,12 +19,34 @@ PAGES = BIN.parent / "dashboard"
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
-    """Dashboard files from the plugin, jobs/ from the project's state folder."""
+    """Dashboard files from the plugin, jobs/ from the project's state folder.
+
+    Answers only requests addressed to this server by its loopback name, so a web
+    page can't read the jobs through DNS rebinding, and serves nothing outside
+    the dashboard folder and the project's jobs/ folder."""
+
+    allowed_hosts = set()
+    jobs = None
+
+    def do_GET(self):
+        if self.headers.get("Host", "") not in self.allowed_hosts:
+            self.send_error(403, "Wrong host")
+            return
+        super().do_GET()
+
+    def do_HEAD(self):
+        if self.headers.get("Host", "") not in self.allowed_hosts:
+            self.send_error(403, "Wrong host")
+            return
+        super().do_HEAD()
 
     def translate_path(self, path):
         rel = path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
         if rel.startswith("jobs/") or rel == "jobs":
-            return super().translate_path(path)
+            target = Path(super().translate_path(path)).resolve()
+            if not target.is_relative_to(self.jobs.resolve()):
+                return str(PAGES / "missing")
+            return str(target)
         page = (PAGES / (rel or "dashboard.html")).resolve()
         if not page.is_relative_to(PAGES.resolve()):
             return str(PAGES / "missing")  # outside the dashboard folder: 404
@@ -38,6 +60,8 @@ def main(argv):
     port = int(argv[0]) if argv else 8765
     project = Project()
     project.jobs.mkdir(parents=True, exist_ok=True)
+    Handler.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    Handler.jobs = project.jobs
     handler = functools.partial(Handler, directory=str(project.dir))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
     print(f"CloudFest After Party · {project.slug}: http://127.0.0.1:{port}/dashboard.html "

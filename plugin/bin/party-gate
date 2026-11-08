@@ -40,6 +40,30 @@ def git(worktree, *args):
     return res.stdout
 
 
+def matches(path, patterns):
+    """fnmatch, ignoring case: on case-insensitive filesystems PROTECTED.txt is protected.txt.
+    A pattern `dir/*` also matches `dir` itself, so a file can't take a protected folder's name."""
+    path = path.casefold()
+    for pattern in patterns:
+        pattern = pattern.casefold()
+        if fnmatch.fnmatchcase(path, pattern) or (pattern.endswith("/*") and path == pattern[:-2]):
+            return True
+    return False
+
+
+def symlinks_changed(project, worktree):
+    """Symlinks the branch added or changed: they can point anywhere, protected folders included."""
+    raw = git(worktree, "-c", "core.quotePath=false", "diff", "--raw", "-z", "--no-renames",
+              f"origin/{project.config['base_branch']}...HEAD")
+    fields = raw.split("\0")
+    hits = []
+    for meta, path in zip(fields[0::2], fields[1::2]):
+        new_mode, status = meta.split()[1], meta.split()[-1]
+        if new_mode == "120000":
+            hits.append(f"{status[0]} {path} (symlink)")
+    return hits
+
+
 def protected_changes(project, worktree):
     """Existing files under protected_paths that the branch modified or deleted, and
     any file it touched, added ones included, under protected_new_paths (CI, agent
@@ -54,18 +78,16 @@ def protected_changes(project, worktree):
         count = 2 if status[0] in "RC" else 1  # renames and copies list old and new path
         paths = fields[i + 1:i + 1 + count]
         i += 1 + count
-        if any(fnmatch.fnmatch(p, pattern) for p in paths
-               for pattern in project.config.get("protected_new_paths", [])):
+        if any(matches(p, project.config.get("protected_new_paths", [])) for p in paths):
             hits.append(f"{status[0]} {paths[-1]}")
             continue
         if status.startswith("A"):
             continue
         # A modified or deleted file, or either side of a rename or copy.
-        hit = next((p for p in paths if any(fnmatch.fnmatch(p, pattern)
-                                            for pattern in project.config["protected_paths"])), None)
+        hit = next((p for p in paths if matches(p, project.config["protected_paths"])), None)
         if hit:
             hits.append(f"{status[0]} {hit}")
-    return hits
+    return hits + symlinks_changed(project, worktree)
 
 
 def run_checks(project, worktree):

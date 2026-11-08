@@ -35,15 +35,35 @@
     ".claude/*",
     ".github/*",
     "*package.json",
+    "*tsconfig*.json",
     "*pnpm-lock.yaml",
     "*package-lock.json",
+    "*npm-shrinkwrap.json",
     "*yarn.lock",
-    "*tsconfig*.json"
+    "*bun.lock",
+    "*bun.lockb",
+    "*go.sum",
+    "*Cargo.lock",
+    "*poetry.lock",
+    "*Pipfile.lock",
+    "*uv.lock",
+    "*Gemfile.lock",
+    "*composer.lock",
+    "*.npmrc",
+    "*.yarnrc",
+    "*.yarnrc.yml",
+    "*pip.conf",
+    "*.pypirc"
   ],
   "protected_new_paths": [
     ".github/*",
     ".claude/*",
-    ".factory/*"
+    ".factory/*",
+    "*.npmrc",
+    "*.yarnrc",
+    "*.yarnrc.yml",
+    "*pip.conf",
+    "*.pypirc"
   ],
   "ports": {
     "base": 5100,
