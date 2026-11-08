@@ -523,14 +523,18 @@ class Security(FactoryTest):
     def test_new_file_colliding_with_a_protected_one_by_case_fails(self):
         f = self.f
         f.to_build(self.id)
-        wt = Path(f.load(self.id)["worktree"])
-        # Write through git's index so the new name exists even on a case-insensitive disk.
+        job = f.load(self.id)
+        wt = Path(job["worktree"])
+        # Commit PROTECTED.TXT through git's index only: on a case-insensitive disk it
+        # can't sit next to protected.txt, and git must not compare the working copy.
         blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=wt, input="shadow\n",
                               capture_output=True, text=True, env=f.env).stdout.strip()
         f.git(wt, "update-index", "--add", "--cacheinfo", f"100644,{blob},PROTECTED.TXT")
-        f.build(self.id, files={"app.txt": "x\n"})
-        # On a case-insensitive disk both names are one file; keep git from comparing it.
         f.git(wt, "update-index", "--skip-worktree", "PROTECTED.TXT")
+        f.git(wt, "commit", "-q", "-m", "shadow the protected file")
+        f.git(wt, "push", "-q", "-u", "origin", job["branch"])
+        f.add_pr(10, job["branch"])
+        f.write(self.id, "build.md", "STATUS: READY\n")
         f.ok("job", "advance", self.id, "gate")
         out = f.run("gate", self.id).stdout
         self.assertIn("A PROTECTED.TXT (collides with a protected file)", out)
