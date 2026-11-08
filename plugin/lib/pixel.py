@@ -269,7 +269,7 @@ def runs(cells):
 
 def sprite_at(x, y, svg, label, anim=None, id_=None):
     a = f' class="bob {anim}"' if anim else ""
-    tag = f' id="{id_}" class="actor" tabindex="0" aria-label="{escape(label)}"' if id_ else ""
+    tag = f' id="{escape(id_)}" class="actor" tabindex="0" aria-label="{escape(label)}"' if id_ else ""
     return f'<g transform="translate({x} {y})"{tag}><g{a}><title>{escape(label)}</title>{svg}</g></g>'
 
 

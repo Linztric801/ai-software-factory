@@ -50,7 +50,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return world.demo_jobs(), {"approvers": ["yusuf", "stefan"]}, "Demo project"
         return read_jobs(self.project.jobs), self.project.config, self.project.slug
 
+    def do_HEAD(self):
+        self.route(head=True)
+
     def do_GET(self):
+        self.route()
+
+    def route(self, head=False):
+        """Every method goes through here, so the Host check covers all of them."""
+        self.head = head
         if self.headers.get("Host", "") not in self.allowed_hosts:
             self.send_error(403, "Wrong host")
             return
@@ -62,7 +70,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             jobs, settings, name = self.state()
             return self.reply(json.dumps(world.regions(jobs, settings, self.theme, name, self.demo)), "application/json")
         if path.startswith("/jobs/") and not self.demo:
-            return super().do_GET()
+            return super().do_HEAD() if head else super().do_GET()
         self.send_error(404)
 
     def reply(self, body, kind):
@@ -72,7 +80,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        if not self.head:
+            self.wfile.write(data)
 
     def translate_path(self, path):
         target = Path(super().translate_path(path)).resolve()

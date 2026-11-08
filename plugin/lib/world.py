@@ -8,6 +8,7 @@ here, in Python, so the browser needs no build step and works without script.
 
 import json
 import math
+import re
 import time
 from collections import Counter
 from html import escape
@@ -59,9 +60,21 @@ SPOTS = {  # where characters stand in each zone (x, y of the 14x18 sprite)
 WORKING = {"Working", "Testing", "Analysing", "Deciding"}
 
 
+HANDLE = re.compile(r"^[A-Za-z0-9_-]{1,39}$")
+
+
 def load_theme(name="cloudfest"):
-    folder = THEMES / name
+    """A theme from the plugin's own themes/ folder, never from anywhere else."""
+    if not re.fullmatch(r"[a-z0-9-]{1,40}", str(name)):
+        raise ValueError(f"theme name {name!r}: use lowercase letters, digits and dashes")
+    folder = (THEMES / name).resolve()
+    if not folder.is_relative_to(THEMES.resolve()) or not (folder / "theme.json").is_file():
+        raise ValueError(f"no theme {name!r} in {THEMES}")
     theme = json.loads((folder / "theme.json").read_text())
+    logo_file = (folder / theme.get("logo", "logo.svg")).resolve()
+    if not logo_file.is_relative_to(folder):
+        raise ValueError(f"theme {name!r}: the logo must be inside the theme folder")
+    theme["logo"] = logo_file.name
     theme["dir"] = folder
     for person in theme.get("people", {}).values():
         acc = person["sprite"].get("acc")
@@ -70,8 +83,17 @@ def load_theme(name="cloudfest"):
     return theme
 
 
+def clean_svg(raw):
+    """Logos are inlined, so drop anything that could run: scripts, event handlers,
+    foreignObject and javascript: links."""
+    raw = re.sub(r"(?is)<script\b.*?</script\s*>", "", raw)
+    raw = re.sub(r"(?is)<foreignObject\b.*?</foreignObject\s*>", "", raw)
+    raw = re.sub(r"(?i)\s+on[a-z]+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", "", raw)
+    return re.sub(r"(?i)(href\s*=\s*[\"'])\s*javascript:[^\"']*", r"\1#", raw)
+
+
 def logo(theme, css_class):
-    raw = (theme["dir"] / theme["logo"]).read_text()
+    raw = clean_svg((theme["dir"] / theme["logo"]).read_text())
     raw = raw.split("?>", 1)[-1] if raw.lstrip().startswith("<?xml") else raw
     raw = raw.replace('fill="black"', 'fill="currentColor"')
     return raw.replace("<svg ", f'<svg class="{css_class}" role="img" aria-label="{escape(theme["name"])}" ', 1)
@@ -100,7 +122,8 @@ def derive(jobs, settings, theme):
     def add(agent, zone, state, why, job, say=None):
         work[agent].append((zone, state, why, job, say or why[:1].upper() + why[1:]))
 
-    approvers = settings.get("approvers", [])
+    # Approver handles come from the project's settings: keep only plain names.
+    approvers = [a for a in settings.get("approvers", []) if isinstance(a, str) and HANDLE.match(a)]
     named = people_for(approvers, theme)
     for job in sorted(jobs, key=lambda j: j.get("started") or ""):
         st, ref = job["stage"], issue_ref(job)
@@ -371,7 +394,7 @@ def popup_scene(world, theme):
         s.append(rect(i + 3, 3 + (i // 8) % 2, 2, 2, cls(["amber", "coral", "cyan"][(i // 8) % 3])))
     s.append(box(14, 46, 92, 5, "wood"))
     cast = ([("host", host["name"], host["sprite"])] if host else []) + \
-           [(p, *(lambda n, r, k: (n, k))(*person_sprite(theme, p))) for p in world["approvers"][:2]]
+           [(f"p{i}", *(lambda n, r, k: (n, k))(*person_sprite(theme, p))) for i, p in enumerate(world["approvers"][:2])]
     xs = [18, 53, 86][:len(cast)]
     tips, rules = [], []
     for (key, name, kw), x in zip(cast, xs):

@@ -713,6 +713,11 @@ class Dashboard(FactoryTest):
             self.assertEqual(self.get(port, path)[0], 404, path)
         self.assertEqual(self.get(port, "/", host=f"localhost:{port}")[0], 200)
         self.assertEqual(self.get(port, f"/jobs/{job_id}/job.json", host="evil.example")[0], 403, "DNS rebinding")
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("HEAD", "/", headers={"Host": "evil.example"})
+        self.assertEqual(conn.getresponse().status, 403, "HEAD checks the host too")
+        conn.close()
 
     def test_demo_mode_is_labelled_and_shows_the_bierfest_call(self):
         port = self.serve("--demo")
@@ -779,6 +784,21 @@ class World(unittest.TestCase):
         self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html)
         live = json.dumps(self.world.regions([evil], {}, self.theme, "acme-widgets"))
         self.assertNotIn("<img src=x", live)
+
+    def test_approver_handles_and_theme_names_from_settings_are_constrained(self):
+        evil = ['x"><script>alert(1)</script>', "a}body{display:none}", "yusuf"]
+        r = self.world.regions([self.job("needs-human", pr=1)], {"approvers": evil}, self.theme, "p")
+        blob = json.dumps(r)
+        self.assertNotIn("<script>alert", blob)
+        self.assertNotIn("display:none}", blob.replace(".tip{display:none}", ""))
+        self.assertIn("Yusuf", r["r-popup"])
+        dirty = '<svg onload="alert(1)"><script>alert(2)</script><foreignObject><b>x</b></foreignObject><a href="javascript:alert(3)"><path/></a></svg>'
+        clean = self.world.clean_svg(dirty)
+        for bad in ("onload", "<script", "foreignObject", "javascript:"):
+            self.assertNotIn(bad, clean)
+        for bad in ("../cloudfest", "/etc", "Cloud Fest", "missing-theme"):
+            with self.assertRaises(ValueError, msg=bad):
+                self.world.load_theme(bad)
 
     def test_the_bierfest_call_appears_only_when_a_person_is_needed(self):
         calm = self.world.regions([self.job("build")], {"approvers": ["yusuf"]}, self.theme, "p")
