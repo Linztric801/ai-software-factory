@@ -3,6 +3,7 @@
   "max_rounds": 3,
   "base_branch": "main",
   "merge_method": "merge",
+  "merge_policy": "human_required",
   "branch_prefix": "factory/",
   "checks": ".factory/checks.sh",
   "theme": "cloudfest",

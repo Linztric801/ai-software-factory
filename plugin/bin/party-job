@@ -14,7 +14,8 @@ Usage:
   party-job queue                      what a run should do with each labeled issue
   party-job create <issue>             new job for an open `factory` issue; prints the job id
   party-job advance <job> <stage>      move a job to <stage>, or refuse
-  party-job merge <job>                APPROVE → sync with the base branch, gate, merge the PR
+  party-job merge <job>                APPROVE → merge (auto policy), or park for a person (human_required)
+  party-job approve <job>              a person approves a parked job: sync, gate, merge the reviewed commit
   party-job feedback <job>             needs-human → build, with your feedback (stdin) as feedback-<k>.md
   party-job reject <job>               needs-info or needs-human → rejected, with your reason (stdin) as rejection.md
   party-job agents <job> <json>        record the routed agent set (called by party-route)
@@ -52,14 +53,16 @@ TRANSITIONS = {
     "build": {"gate", "needs-human"},
     "gate": {"review", "build", "needs-human"},
     "review": {"approve", "build", "needs-human"},
-    "approve": {"merging", "needs-human"},
+    "approve": {"merging", "needs-human", "awaiting-approval"},
+    "awaiting-approval": {"merging", "build", "rejected"},
     "merging": {"needs-human"},
     "needs-human": {"build", "rejected"},
 }
 TERMINAL = {"merged", "rejected"}
 # Any unfinished job can move to merged once its PR is merged on GitHub,
 # whether the factory merged it or a person did mid-round.
-WAITING = {"needs-info", "needs-human"}
+WAITING = {"needs-info", "needs-human", "awaiting-approval"}
+MERGE_POLICIES = {"human_required", "auto_after_approval"}
 CONCURRENCY = CONFIG["concurrency"]
 
 
@@ -395,7 +398,7 @@ def advance(job, stage):
 
     if stage == "merged":
         require(job["pr"] and pr_state(job) == "MERGED", "the PR isn't merged")
-        if old == "needs-human":
+        if old in ("needs-human", "awaiting-approval"):
             label("issue", job["issue"], remove=LABELS["needs_human"])
 
     elif stage == "rejected" and old in WAITING:
@@ -503,13 +506,21 @@ def advance(job, stage):
                 next_round(job)
 
     elif old == "approve":
-        want = "APPROVE" if stage == "merging" else "ESCALATE"
+        want = "ESCALATE" if stage == "needs-human" else "APPROVE"
         line = first_line(d / "decision.md")
         require(line == want, f"decision.md starts with {line!r}, not {want}")
-        if stage == "merging":
+        if stage in ("merging", "awaiting-approval"):
             require_reviewed_head(job)
+        if stage == "merging":
+            require(merge_policy() == "auto_after_approval",
+                    "this project's merge_policy is human_required: a person approves with `party-job approve`")
 
-    elif old == "needs-human":
+    elif old == "awaiting-approval" and stage == "merging":
+        require(job.get("approved_by"), "use `party-job approve` to approve a parked job")
+        require_reviewed_head(job)
+        label("issue", job["issue"], remove=LABELS["needs_human"])
+
+    elif old in ("needs-human", "awaiting-approval"):  # → build, with feedback
         feedback = sorted(d.glob("feedback-*.md"))
         require(feedback and feedback[-1].stat().st_mtime > (d / "decision.md").stat().st_mtime,
                 "use `job feedback` to send a job back to the builder")
@@ -525,6 +536,16 @@ def advance(job, stage):
             comment("pr", job["pr"], body)
         else:
             comment("issue", job["issue"], body)
+        label("issue", job["issue"], add=LABELS["needs_human"])
+
+    if stage == "awaiting-approval":
+        summary = section(d / "decision.md", "Summary") or ""
+        body = ("### Factory: approved, waiting for a person\n\n"
+                "The approver says APPROVE. This project merges only after a person approves: "
+                "merge this PR, or run `party-job approve` in the project.\n\n" + summary)
+        if gh_json("pr", "view", str(job["pr"]), "--json", "isDraft")["isDraft"]:
+            gh("pr", "ready", str(job["pr"]))
+        comment("pr", job["pr"], body)
         label("issue", job["issue"], add=LABELS["needs_human"])
 
     if stage in TERMINAL and Path(job["worktree"]).exists():
@@ -598,6 +619,9 @@ def cmd_queue():
                 replied_rows.append(("resume", n, j["id"], j["stage"], "author replied"))
             else:
                 other_rows.append(("wait", n, j["id"], j["stage"], "waiting for the author"))
+        elif j["stage"] == "awaiting-approval":
+            other_rows.append(("wait", n, j["id"], j["stage"], f"approve with party-job approve {j['id']}, "
+                               f"merge PR #{j['pr']}, or give feedback"))
         elif j["stage"] == "needs-human":
             other_rows.append(("wait", n, j["id"], j["stage"], f"merge PR #{j['pr']}, or give feedback"
                                if j["pr"] else "give feedback"))
@@ -623,6 +647,23 @@ def cmd_queue():
         print("\t".join(str(c) for c in row))
 
 
+def merge_policy():
+    policy = CONFIG.get("merge_policy", "human_required")
+    if policy not in MERGE_POLICIES:
+        die(f"merge_policy {policy!r} isn't one of {', '.join(sorted(MERGE_POLICIES))}")
+    return policy
+
+
+def cmd_approve(job):
+    """A person approves a job the policy parked: then it merges like any approved job."""
+    if job["stage"] != "awaiting-approval":
+        die(f"{job['id']} is in {job['stage']}, not awaiting-approval")
+    job["approved_by"] = operator()
+    save(advance(sync(job), "merging"))
+    print(f"{job['id']}: approved by @{job['approved_by']}")
+    cmd_merge(job)
+
+
 def cmd_merge(job):
     sync(job)
     if job["stage"] == "approve":
@@ -632,6 +673,10 @@ def cmd_merge(job):
             escalate(job, f"The branch changed after review, so nothing was merged.\n\n{e}")
             save(advance(sync(job), "needs-human"))
             print(f"{job['id']}: needs-human: the branch changed after review")
+            return
+        if merge_policy() == "human_required":
+            save(advance(job, "awaiting-approval"))
+            print(f"{job['id']}: awaiting-approval: PR #{job['pr']} waits for a person")
             return
         save(advance(job, "merging"))
     if job["stage"] != "merging":
@@ -685,8 +730,8 @@ def cmd_merge(job):
 
 
 def cmd_feedback(job, text):
-    if job["stage"] != "needs-human":
-        die(f"{job['id']} is in {job['stage']}, not needs-human")
+    if job["stage"] not in ("needs-human", "awaiting-approval"):
+        die(f"{job['id']} is in {job['stage']}, not needs-human or awaiting-approval")
     if not text.strip():
         die("no feedback on stdin")
     d = job_dir(job["id"])
@@ -698,7 +743,7 @@ def cmd_feedback(job, text):
 
 def cmd_reject(job, text):
     if job["stage"] not in WAITING:
-        die(f"{job['id']} is in {job['stage']}, not needs-info or needs-human")
+        die(f"{job['id']} is in {job['stage']}, not waiting for a person")
     if not text.strip():
         die("no reason on stdin")
     (job_dir(job["id"]) / "rejection.md").write_text(f"REJECTED\n\nBy @{operator()} while the job was {job['stage']}.\n\n{text.strip()}\n")
@@ -759,6 +804,8 @@ def main(argv):
             job = advance(sync(resolve(args[0])), args[1])
             save(sync(job))
             print(f"{job['id']}: {job['stage']} (round {job['round']})")
+        elif cmd == "approve" and len(args) == 1:
+            cmd_approve(resolve(args[0]))
         elif cmd == "merge" and len(args) == 1:
             cmd_merge(resolve(args[0]))
         elif cmd == "feedback" and len(args) == 1:

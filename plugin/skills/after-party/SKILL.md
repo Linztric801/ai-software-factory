@@ -155,14 +155,17 @@ finished:
 
 **approve.** When the approver returns, read `decision.md`'s first line:
 
-- `APPROVE`: `party-job merge <id>`. It syncs the branch with the base,
+- `APPROVE`: `party-job merge <id>`. With the project's `merge_policy` at
+  `human_required` (the default) it parks the job at `awaiting-approval`: the PR is
+  ready, commented and labelled, and a person approves with `party-job approve <id>`
+  or merges it on GitHub. With `auto_after_approval` it syncs the branch with the base,
   runs the gate again, pushes, and merges the PR, ending in `merged`. If any
   of that fails it moves the job to `needs-human` and says why.
 - `ESCALATE`: `party-job advance <id> needs-human`. It marks the PR ready,
   posts the decision on it and labels the issue `factory:needs-human`.
 
 A job is finished for this run when it reaches `merged`, `rejected`,
-`needs-info` or `needs-human`.
+`needs-info`, `needs-human` or `awaiting-approval`.
 
 A person can merge a job's PR by hand at any stage. `party-job queue`
 then moves the job to `merged`; stop any agents still running for it.
@@ -212,6 +215,8 @@ new feature, ask.
 - **A question** (status, cost, why a job escalated, what a reviewer said):
   answer from `party-job summary`, `job.json` and the job's files. Here
   you may read a file in full when the answer is in it.
+- **Approving a parked job** (`awaiting-approval`): run `party-job approve <n>`;
+  it merges the reviewed commit after syncing and running the checks again.
 - **What needs them**: run `party-job queue`. For each `wait` line, say
   what the job is waiting for: the question in `decision.md` for `needs-human`,
   the question in `intake.md` for `needs-info`.

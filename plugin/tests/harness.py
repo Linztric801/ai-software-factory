@@ -18,6 +18,7 @@ FAKES = HERE / "fakes"
 TEST_CONFIG = {
     "concurrency": 2,
     "max_rounds": 2,
+    "merge_policy": "auto_after_approval",  # like ScanBadge; the HumanApproval tests switch it
     "protected_paths": ["protected.txt", "données.txt"],
 }
 

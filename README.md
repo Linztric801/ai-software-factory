@@ -113,9 +113,6 @@ cd plugin/tests && python3 -m unittest -v
 The tests run the real scripts against a throwaway git repository and a fake
 `gh`. Needs Python 3.11+, git and the GitHub CLI.
 
-`deploy/.env.example` lists the settings of the coming server edition (web
-dashboard, API, sandboxed workers, optional Microsoft Entra ID login).
-
 ## License
 
 MIT. See `LICENSE`.

@@ -145,6 +145,10 @@ def derive(jobs, settings, theme):
             add("approver", "venue", "Deciding", f"deciding {ref}", job)
         elif st == "merging":
             add("approver", "venue", "Working", f"merging {ref}", job)
+        elif st == "awaiting-approval":
+            who = " and ".join(named) if named else "a person"
+            say = f"Waiting for {named[0]}" if len(named) == 1 else (f"Waiting for {len(named)} people" if named else "Waiting for a person")
+            add("approver", "beerfest", "Waiting for approval", f"{ref} approved, needs {who} to merge", job, say)
         elif st == "needs-human":
             who = " and ".join(named) if named else "a person"
             say = f"Waiting for {named[0]}" if len(named) == 1 else (f"Waiting for {len(named)} people" if named else "Waiting for a person")
@@ -168,7 +172,7 @@ def derive(jobs, settings, theme):
         agents[k] = {"zone": zone, "state": state, "why": why, "jobs": [i[3] for i in items], "say": say}
     stages = Counter(j["stage"] for j in jobs)
     running = sum(n for s, n in stages.items() if s in {"intake", "spec", "build", "gate", "review", "approve", "merging"})
-    waiting = [j for j in jobs if j["stage"] == "needs-human"]
+    waiting = [j for j in jobs if j["stage"] in ("needs-human", "awaiting-approval")]
     merged = sorted((j for j in jobs if j["stage"] == "merged"), key=lambda j: j.get("ended") or "")
     return {
         "agents": agents,
@@ -577,9 +581,9 @@ def regions(jobs, settings, theme, project, demo=False):
 
     columns = [("Queued", ["intake", "needs-info"]), ("Spec and build", ["spec", "build"]),
                ("Checks and review", ["gate", "review", "approve", "merging"]),
-               ("Waiting for a person", ["needs-human"]), ("Done", ["merged"]), ("Rejected", ["rejected"])]
+               ("Waiting for a person", ["needs-human", "awaiting-approval"]), ("Done", ["merged"]), ("Rejected", ["rejected"])]
     def card(j):
-        tone = " tone-human" if j["stage"] == "needs-human" else ""
+        tone = " tone-human" if j["stage"] in ("needs-human", "awaiting-approval") else ""
         return (f'<li class="quest{tone}"><span class="quest-title">{escape(j["title"])}</span>'
                 f'<span class="quest-meta">#{j["issue"]}, {escape(j["stage"])}, round {j["round"]}</span></li>')
     board = "".join(

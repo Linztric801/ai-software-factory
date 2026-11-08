@@ -400,6 +400,88 @@ class Approve(FactoryTest):
         self.assertEqual(f.load(self.id)["stage"], "merged")
 
 
+class HumanApproval(FactoryTest):
+    """merge_policy human_required: APPROVE parks the job until a person approves."""
+
+    def setUp(self):
+        super().setUp()
+        f = self.f
+        f.state_dir.mkdir(parents=True, exist_ok=True)
+        (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "human_required"}))
+        self.id = f.new_job()
+        f.to_review(self.id)
+        f.review(self.id, ALL_PASS)
+        f.ok("job", "advance", self.id, "approve")
+        f.write(self.id, "decision.md", "APPROVE\n\n## Summary\n- all good\n")
+
+    def park(self):
+        out = self.f.ok("job", "merge", self.id)
+        self.assertIn("awaiting-approval: PR #10 waits for a person", out)
+
+    def test_approve_parks_the_job_and_tells_the_people(self):
+        f = self.f
+        self.park()
+        self.assertEqual(f.load(self.id)["stage"], "awaiting-approval")
+        self.assertEqual(f.calls("pr", "merge"), [], "nothing merges without a person")
+        pr = f.gh()["prs"]["10"]
+        self.assertFalse(pr["isDraft"])
+        self.assertIn("approved, waiting for a person", pr["comments"][-1]["body"])
+        self.assertIn("factory:needs-human", f.labels(1))
+        self.assertIn(f"wait\t1\t{self.id}\tawaiting-approval\tapprove with party-job approve", f.ok("job", "queue"))
+        self.refused("advance", self.id, "merging", says="use `party-job approve`")
+
+    def test_a_person_approves_and_the_reviewed_commit_merges(self):
+        f = self.f
+        self.park()
+        reviewed = f.load(self.id)["reviewed_commit"]
+        out = f.ok("job", "approve", self.id)
+        self.assertIn("approved by @owner", out)
+        self.assertIn("merged PR #10", out)
+        job = f.load(self.id)
+        self.assertEqual((job["stage"], job["approved_by"]), ("merged", "owner"))
+        self.assertEqual(f.gh()["prs"]["10"]["merged_sha"], reviewed)
+        self.assertNotIn("factory:needs-human", f.labels(1))
+
+    def test_approval_refuses_a_branch_that_moved_while_parked(self):
+        f = self.f
+        self.park()
+        wt = Path(f.load(self.id)["worktree"])
+        (wt / "app.txt").write_text("unreviewed\n")
+        f.git(wt, "commit", "-q", "-am", "sneak in")
+        self.refused("approve", self.id, says="moved since review")
+        self.assertEqual(f.calls("pr", "merge"), [])
+
+    def test_feedback_or_reject_instead_of_approving(self):
+        f = self.f
+        self.park()
+        self.assertIn("round 2", f.ok("job", "feedback", self.id, stdin="Rename the button first."))
+        self.assertEqual(f.load(self.id)["stage"], "build")
+
+    def test_reject_a_parked_job(self):
+        f = self.f
+        self.park()
+        f.ok("job", "reject", self.id, stdin="Not this one.")
+        self.assertEqual(f.load(self.id)["stage"], "rejected")
+        self.assertEqual(f.gh()["prs"]["10"]["state"], "CLOSED")
+
+    def test_merging_on_github_counts_as_approval(self):
+        f = self.f
+        self.park()
+        gh = f.gh()
+        gh["prs"]["10"]["state"] = "MERGED"
+        f.set_gh(gh)
+        f.ok("job", "queue")
+        self.assertEqual(f.load(self.id)["stage"], "merged")
+        self.assertNotIn("factory:needs-human", f.labels(1))
+
+    def test_an_unknown_policy_is_refused(self):
+        f = self.f
+        (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "yolo"}))
+        res = f.job("merge", self.id)
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("merge_policy 'yolo'", res.stderr)
+
+
 class Queue(FactoryTest):
     def test_new_jobs_fill_free_slots_then_hold(self):
         f = self.f
@@ -799,6 +881,12 @@ class World(unittest.TestCase):
         for bad in ("../cloudfest", "/etc", "Cloud Fest", "missing-theme"):
             with self.assertRaises(ValueError, msg=bad):
                 self.world.load_theme(bad)
+
+    def test_a_parked_job_waits_at_the_bierfest(self):
+        a = self.where(self.job("awaiting-approval", pr=3), approvers=["yusuf"])["approver"]
+        self.assertEqual((a["zone"], a["state"], a["say"]), ("beerfest", "Waiting for approval", "Waiting for Yusuf"))
+        r = self.world.regions([self.job("awaiting-approval", pr=3)], {"approvers": ["yusuf"]}, self.theme, "p")
+        self.assertIn("Christian needs you", r["r-popup"])
 
     def test_the_bierfest_call_appears_only_when_a_person_is_needed(self):
         calm = self.world.regions([self.job("build")], {"approvers": ["yusuf"]}, self.theme, "p")
