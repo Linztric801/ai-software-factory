@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "^cloudfest:builder$",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/party-gate --hook" }
+        ]
+      }
+    ]
+  }
+}

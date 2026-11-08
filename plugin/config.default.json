@@ -3,6 +3,8 @@
   "max_rounds": 3,
   "base_branch": "main",
   "merge_method": "merge",
+  "branch_prefix": "factory/",
+  "checks": ".factory/checks.sh",
   "labels": {
     "queue": "factory",
     "needs_info": "factory:needs-info",
@@ -29,14 +31,19 @@
     }
   },
   "protected_paths": [
-    "factory/checks.sh",
-    "factory/config.json",
-    "factory/*",
+    ".factory/*",
     ".claude/*",
     ".github/*",
     "*package.json",
-    "*lock*",
+    "*pnpm-lock.yaml",
+    "*package-lock.json",
+    "*yarn.lock",
     "*tsconfig*.json"
+  ],
+  "protected_new_paths": [
+    ".github/*",
+    ".claude/*",
+    ".factory/*"
   ],
   "ports": {
     "base": 5100,

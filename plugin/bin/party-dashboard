@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Serve the factory dashboard for the project in the working directory.
+
+Usage: party-dashboard [port]    (default 8765; listens on 127.0.0.1 only)
+
+The pages read the project's jobs/ folder in its state folder. Stop with Ctrl-C.
+"""
+
+import http.server
+import functools
+import sys
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN.parent / "lib"))
+from party import Project  # noqa: E402
+
+PAGES = BIN.parent / "dashboard"
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    """Dashboard files from the plugin, jobs/ from the project's state folder."""
+
+    def translate_path(self, path):
+        rel = path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+        if rel.startswith("jobs/") or rel == "jobs":
+            return super().translate_path(path)
+        page = (PAGES / (rel or "dashboard.html")).resolve()
+        if not page.is_relative_to(PAGES.resolve()):
+            return str(PAGES / "missing")  # outside the dashboard folder: 404
+        return str(page)
+
+    def log_message(self, *args):
+        pass
+
+
+def main(argv):
+    port = int(argv[0]) if argv else 8765
+    project = Project()
+    project.jobs.mkdir(parents=True, exist_ok=True)
+    handler = functools.partial(Handler, directory=str(project.dir))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    print(f"CloudFest After Party · {project.slug}: http://127.0.0.1:{port}/dashboard.html "
+          f"(office: /office.html)", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

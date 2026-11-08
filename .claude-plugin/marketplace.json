@@ -1,0 +1,14 @@
+{
+  "name": "cloudfest-after-party",
+  "owner": {
+    "name": "Linztric801"
+  },
+  "description": "CloudFest After Party: a CloudFest-style AI software factory for Claude Code",
+  "plugins": [
+    {
+      "name": "cloudfest",
+      "source": "./plugin",
+      "description": "CloudFest After Party: a CloudFest-style AI software factory that turns GitHub issues into reviewed pull requests"
+    }
+  ]
+}

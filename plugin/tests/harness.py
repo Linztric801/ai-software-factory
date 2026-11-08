@@ -1,30 +1,24 @@
-"""A throwaway factory install for tests: a bare origin, a main checkout with
-factory/ copied in, the fake gh on PATH, and an isolated git and Claude config."""
+"""A throwaway project for tests: a bare origin, a main checkout with a
+.factory/ folder, a temporary PARTY_HOME for the factory's state, the fake gh on
+PATH, and an isolated git and Claude config. The scripts run from plugin/bin."""
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BIN = HERE.parent / "factory" / "bin"
+BIN = HERE.parent / "bin"
+ORIGIN_URL = "https://github.test/acme/widgets.git"
+SLUG = "acme-widgets"
 FAKES = HERE / "fakes"
 
+# The project's .factory/config.json, layered over the plugin's defaults.
 TEST_CONFIG = {
     "concurrency": 2,
     "max_rounds": 2,
-    "base_branch": "main",
-    "merge_method": "merge",
-    "labels": {"queue": "factory", "needs_info": "factory:needs-info", "needs_human": "factory:needs-human"},
-    "routing": {"low": {"code": "haiku"}, "medium": {"code": "sonnet"}, "high": {"code": "sonnet"}},
-    "surface_reviewers": {"ui": {"ux": "sonnet", "ui": "haiku"}, "security": {"security": "opus"}},
-    "protected_paths": ["factory/*", "protected.txt"],
-    "ports": {"base": 5100, "step": 10},
-    "prices_usd_per_mtok": {
-        "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_write_5m": 5.0, "cache_write_1h": 8.0, "cache_read": 0.20},
-    },
+    "protected_paths": ["protected.txt", "données.txt"],
 }
 
 INTAKE_ACCEPT = "DECISION: ACCEPT\nRESCOPED: no\nRISK: medium\nSURFACES: ui\n\n## Scope\nDark mode for the settings page.\n"
@@ -37,28 +31,35 @@ class Factory:
         self.origin = self.root / "origin.git"
         self.repo = self.root / "repo"
         self.claude = self.root / "claude"
+        self.home = self.root / "home"
         self.state = self.root / "gh.json"
         self.env = {
             **os.environ,
             "PATH": f"{FAKES}{os.pathsep}{os.environ['PATH']}",
             "FAKE_GH_STATE": str(self.state),
+            "PARTY_HOME": str(self.home),
             "CLAUDE_CONFIG_DIR": str(self.claude),
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
             "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
         }
+        for var in ("PARTY_REPO", "PARTY_PROJECT"):
+            self.env.pop(var, None)
         self.env.pop("CHECKS_EXIT", None)
         self.env.pop("FAKE_GH_MERGE_FAILS", None)
         self.state.write_text(json.dumps({"user": "owner", "issues": {}, "prs": {}, "calls": []}))
         self.git(self.root, "init", "-q", "--bare", "-b", "main", str(self.origin))
         self.git(self.root, "clone", "-q", str(self.origin), str(self.repo))
-        factory = self.repo / "factory"
-        shutil.copytree(BIN, factory / "bin")
+        # origin looks like a GitHub URL; git rewrites it to the local bare repo.
+        self.git(self.repo, "remote", "set-url", "origin", ORIGIN_URL)
+        self.git(self.repo, "config", f"url.{self.origin}.insteadOf", ORIGIN_URL)
+        factory = self.repo / ".factory"
+        factory.mkdir()
         (factory / "config.json").write_text(json.dumps(TEST_CONFIG, indent=2))
         (factory / "checks.sh").write_text('echo "checks ran in $PWD"\nexit "${CHECKS_EXIT:-0}"\n')
-        (self.repo / ".gitignore").write_text("/factory/jobs/\n/.worktrees/\n")
         (self.repo / "protected.txt").write_text("do not touch\n")
+        (self.repo / "données.txt").write_text("protected too\n")
         (self.repo / "app.txt").write_text("v1\n")
         self.git(self.repo, "add", "-A")
         self.git(self.repo, "commit", "-q", "-m", "initial")
@@ -73,8 +74,8 @@ class Factory:
         return subprocess.run(["git", *args], cwd=cwd, env=self.env, check=True,
                               capture_output=True, text=True).stdout
 
-    def run(self, script, *args, stdin=None, env=None):
-        return subprocess.run([str(self.repo / "factory" / "bin" / script), *args], cwd=self.repo,
+    def run(self, script, *args, stdin=None, env=None, cwd=None):
+        return subprocess.run([str(BIN / f"party-{script}"), *args], cwd=cwd or self.repo,
                               env={**self.env, **(env or {})}, input=stdin, capture_output=True, text=True)
 
     def job(self, *args, **kw):
@@ -102,10 +103,12 @@ class Factory:
         }
         self.set_gh(gh)
 
-    def add_pr(self, n, head, draft=True):
+    def add_pr(self, n, head, draft=True, fork=False, head_sha=None):
         gh = self.gh()
         gh["prs"][str(n)] = {"number": n, "url": f"https://github.test/o/r/pull/{n}", "head": head,
-                             "state": "OPEN", "isDraft": draft, "comments": []}
+                             "state": "OPEN", "isDraft": draft, "comments": [], "isCrossRepository": fork}
+        if head_sha:
+            gh["prs"][str(n)]["headRefOid"] = head_sha
         self.set_gh(gh)
 
     def labels(self, n):
@@ -116,8 +119,12 @@ class Factory:
 
     # ---- job files ----------------------------------------------------------
 
+    @property
+    def state_dir(self):
+        return self.home / "projects" / SLUG
+
     def dir(self, job_id):
-        return self.repo / "factory" / "jobs" / job_id
+        return self.state_dir / "jobs" / job_id
 
     def write(self, job_id, name, text):
         path = self.dir(job_id) / name

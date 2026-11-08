@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""The deterministic gate: does the job's branch pass the project's checks?
+
+Usage:
+  party-gate <job-id>            write round-N/checks.md; exit 0 on PASS, 1 on FAIL
+  party-gate <job-id> --merge    same, as round-N/merge-checks.md (party-job merge runs it)
+  party-gate --hook              builder SubagentStop hook: run the checks once, exit 2 on failure
+
+The gate runs the main checkout's checks script (`.factory/checks.sh` unless the
+settings name another) inside the job's worktree, so a branch can't change the
+checks it is judged by. It also fails when the branch modifies or deletes a
+file matching the settings' `protected_paths` (fnmatch patterns, where `*` also
+matches `/`). Adding new files is fine.
+"""
+
+import fnmatch
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN.parent / "lib"))
+from party import Project, project_of_job_folder  # noqa: E402
+
+TAIL = 80
+
+
+def die(msg):
+    print(f"gate: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def git(worktree, *args):
+    res = subprocess.run(["git", *args], cwd=worktree, capture_output=True, text=True)
+    if res.returncode != 0:
+        die(f"`git {' '.join(args)}` failed: {res.stderr.strip()}")
+    return res.stdout
+
+
+def protected_changes(project, worktree):
+    """Existing files under protected_paths that the branch modified or deleted, and
+    any file it touched, added ones included, under protected_new_paths (CI, agent
+    and factory config, where a new file is as powerful as a changed one)."""
+    diff = git(worktree, "-c", "core.quotePath=false", "diff", "--name-status", "-z",
+               f"origin/{project.config['base_branch']}...HEAD")
+    hits = []
+    fields = diff.split("\0")
+    i = 0
+    while i < len(fields) - 1:
+        status = fields[i]
+        count = 2 if status[0] in "RC" else 1  # renames and copies list old and new path
+        paths = fields[i + 1:i + 1 + count]
+        i += 1 + count
+        if any(fnmatch.fnmatch(p, pattern) for p in paths
+               for pattern in project.config.get("protected_new_paths", [])):
+            hits.append(f"{status[0]} {paths[-1]}")
+            continue
+        if status.startswith("A"):
+            continue
+        # A modified or deleted file, or either side of a rename or copy.
+        hit = next((p for p in paths if any(fnmatch.fnmatch(p, pattern)
+                                            for pattern in project.config["protected_paths"])), None)
+        if hit:
+            hits.append(f"{status[0]} {hit}")
+    return hits
+
+
+def run_checks(project, worktree):
+    if not project.checks.exists():
+        die(f"no checks script at {project.checks}: add .factory/checks.sh to the project "
+            "(or set `checks` in its settings)")
+    start = time.monotonic()
+    res = subprocess.run(["bash", str(project.checks)], cwd=worktree, capture_output=True, text=True)
+    return res.returncode, res.stdout + res.stderr, int(time.monotonic() - start)
+
+
+def gate(job_id, merge):
+    project = Project()
+    job = json.loads((project.jobs / job_id / "job.json").read_text())
+    worktree = job["worktree"]
+    if job["round"] < 1:
+        die(f"{job_id} hasn't started a build round")
+    round_dir = project.jobs / job_id / f"round-{job['round']}"
+    commit = git(worktree, "rev-parse", "HEAD").strip()
+    protected = protected_changes(project, worktree)
+    code, log, seconds = run_checks(project, worktree)
+    verdict = "PASS" if code == 0 and not protected else "FAIL"
+    name = "merge-checks" if merge else "checks"
+    (round_dir / f"{name}.log").write_text(log)
+    tail = "\n".join(log.rstrip().splitlines()[-TAIL:])
+    checks_name = project.checks.name
+    summary = [
+        f"{checks_name} {'passed' if code == 0 else f'failed with exit {code}'} in {seconds}s",
+        f"Protected paths: {'changed: ' + ', '.join(protected) if protected else 'none changed'}",
+        f"Commit {commit[:7]}" + (", synced with the latest main before merging" if merge else ""),
+    ]
+    (round_dir / f"{name}.md").write_text(
+        f"GATE: {verdict}\nCOMMIT: {commit}\n\n"
+        "## Summary\n" + "\n".join(f"- {s}" for s in summary) + "\n\n"
+        "## Protected paths\n"
+        + ("\n".join(f"- {p}" for p in protected) if protected else "None changed.")
+        + f"\n\n## {checks_name}\nExit {code} in {seconds}s. Last {TAIL} lines of {name}.log:\n\n```\n{tail}\n```\n"
+    )
+    print(f"GATE: {verdict} ({job_id} round {job['round']}, {checks_name} exit {code} in {seconds}s"
+          + (f", protected paths changed: {', '.join(protected)}" if protected else "") + ")")
+    sys.exit(0 if verdict == "PASS" else 1)
+
+
+def hook():
+    event = json.load(sys.stdin)
+    if event.get("stop_hook_active"):
+        sys.exit(0)  # one nudge per stop; the gate decides
+    with open(Path(event["agent_transcript_path"]).expanduser()) as f:
+        content = json.loads(f.readline())["message"]["content"]
+    prompt = content if isinstance(content, str) else " ".join(b.get("text", "") for b in content)
+    m = re.search(r"Job folder: (\S+)", prompt)
+    if not m:
+        sys.exit(0)  # not a factory job
+    job_folder = Path(m.group(1).rstrip("./"))
+    project = project_of_job_folder(job_folder)
+    job = json.loads((job_folder / "job.json").read_text())
+    code, log, _ = run_checks(project, job["worktree"])
+    if code != 0:
+        tail = "\n".join(log.rstrip().splitlines()[-40:])
+        print(f"{project.checks.name} fails in your worktree (exit {code}). The gate will reject this "
+              f"build. Fix it, or write STATUS: BLOCKED in build.md if you can't.\n\n{tail}",
+              file=sys.stderr)
+        sys.exit(2)
+
+
+def main(argv):
+    if argv == ["--hook"]:
+        hook()
+    elif len(argv) == 1 and not argv[0].startswith("-"):
+        gate(argv[0], merge=False)
+    elif len(argv) == 2 and argv[1] == "--merge":
+        gate(argv[0], merge=True)
+    else:
+        die(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
