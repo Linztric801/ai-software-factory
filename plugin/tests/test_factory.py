@@ -539,6 +539,24 @@ class Security(FactoryTest):
         out = f.run("gate", self.id).stdout
         self.assertIn("A PROTECTED.TXT (collides with a protected file)", out)
 
+    def test_invisible_characters_and_trailing_dots_are_folded(self):
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("party_gate", str(BIN / "party-gate"))
+        spec = importlib.util.spec_from_loader("party_gate", loader)
+        gate = importlib.util.module_from_spec(spec)
+        loader.exec_module(gate)
+        for sneaky in (".git\u200dhub/workflows/x.yml", ".github./workflows/x.yml", ".GITHUB/x", "．github/x"):
+            self.assertTrue(gate.matches(sneaky, [".github/*"]), sneaky)
+        self.assertEqual(gate.fold("Protected.TXT. "), "protected.txt")
+
+    def test_a_project_cannot_shrink_the_protected_lists(self):
+        f = self.f
+        (f.repo / ".factory" / "config.json").write_text(json.dumps({"protected_new_paths": [], "protected_paths": []}))
+        out = f.ok("job", "where")
+        self.assertIn(".github/*", next(l for l in out.splitlines() if l.startswith("no new")))
+        self.assertIn("*go.sum", next(l for l in out.splitlines() if l.startswith("protected")))
+
     def test_adding_ci_or_agent_config_fails_the_gate(self):
         f = self.f
         f.to_build(self.id)

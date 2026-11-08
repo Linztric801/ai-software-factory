@@ -41,12 +41,21 @@ def git(worktree, *args):
     return res.stdout
 
 
+def fold(path):
+    """A path as a case-insensitive, normalising filesystem compares it: invisible
+    characters dropped, trailing dots and spaces of each part dropped, Unicode
+    compatibility-normalised and case-folded."""
+    path = "".join(c for c in path if unicodedata.category(c) != "Cf" and not 0xFE00 <= ord(c) <= 0xFE0F)
+    path = "/".join(part.rstrip(". ") or part for part in path.split("/"))
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFKC", path).casefold())
+
+
 def matches(path, patterns):
-    """fnmatch, ignoring case: on case-insensitive filesystems PROTECTED.txt is protected.txt.
+    """fnmatch on folded names: on case-insensitive filesystems PROTECTED.txt is protected.txt.
     A pattern `dir/*` also matches `dir` itself, so a file can't take a protected folder's name."""
-    path = path.casefold()
+    path = fold(path)
     for pattern in patterns:
-        pattern = pattern.casefold()
+        pattern = fold(pattern)
         if fnmatch.fnmatchcase(path, pattern) or (pattern.endswith("/*") and path == pattern[:-2]):
             return True
     return False
@@ -65,15 +74,12 @@ def symlinks_changed(project, worktree):
     return hits
 
 
-def fold(path):
-    return unicodedata.normalize("NFC", path).casefold()
-
-
 def protected_in_base(project, worktree):
     """Folded names of the base branch's files that match protected_paths."""
     tree = git(worktree, "-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only",
                f"origin/{project.config['base_branch']}")
-    return {fold(p) for p in tree.split("\0") if p and matches(p, project.config["protected_paths"])}
+    names = [p for p in tree.split("\0") if p and matches(p, project.config["protected_paths"])]
+    return {fold(p) for p in names}, set(names)
 
 
 def protected_changes(project, worktree):
@@ -83,7 +89,7 @@ def protected_changes(project, worktree):
     diff = git(worktree, "-c", "core.quotePath=false", "diff", "--name-status", "-z",
                f"origin/{project.config['base_branch']}...HEAD")
     hits = []
-    base_protected = protected_in_base(project, worktree)
+    base_protected, base_exact = protected_in_base(project, worktree)
     fields = diff.split("\0")
     i = 0
     while i < len(fields) - 1:
@@ -94,11 +100,12 @@ def protected_changes(project, worktree):
         if any(matches(p, project.config.get("protected_new_paths", [])) for p in paths):
             hits.append(f"{status[0]} {paths[-1]}")
             continue
+        # A new path (added, or a rename or copy target) that names a protected file
+        # in another case or Unicode form replaces it on case-insensitive filesystems.
+        if status[0] in "ARCT" and fold(paths[-1]) in base_protected and paths[-1] not in base_exact:
+            hits.append(f"{status[0]} {paths[-1]} (collides with a protected file)")
+            continue
         if status.startswith("A"):
-            # A new file that differs from a protected one only in case or Unicode form
-            # replaces it on case-insensitive filesystems.
-            if fold(paths[-1]) in base_protected:
-                hits.append(f"A {paths[-1]} (collides with a protected file)")
             continue
         # A modified or deleted file, or either side of a rename or copy.
         hit = next((p for p in paths if matches(p, project.config["protected_paths"])), None)

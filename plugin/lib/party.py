@@ -9,7 +9,7 @@ folder. For the git repository the commands run in, this module finds:
 - the settings, layered: the plugin's `config.default.json`, then the
   project's `.factory/config.json`, then the local `config.json`. A layer
   overrides keys of the one before; tables merge one level deep, and
-  `protected_paths` only ever grows,
+  `protected_paths` and `protected_new_paths` only ever grow,
 - the checks script, `.factory/checks.sh` unless the settings say otherwise.
 """
 
@@ -69,7 +69,7 @@ def _read(path):
 def merge(base, layer):
     merged = dict(base)
     for key, value in layer.items():
-        if key == "protected_paths":
+        if key in ("protected_paths", "protected_new_paths"):
             merged[key] = merged.get(key, []) + [p for p in value if p not in merged.get(key, [])]
         elif isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = {**merged[key], **value}
