@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Import the jobs of an in-repo factory (factory/jobs/) into the plugin's state.
+
+Usage: party-import <old jobs folder>     e.g. party-import factory/jobs
+
+Run it in the project's checkout. Each job folder is copied to the project's
+state folder with its files unchanged; job.json gains the fields the plugin
+records (`repo`, `reviewed_commit`). Jobs that already exist there are skipped,
+and .lock files are left behind. New jobs then continue the numbering.
+"""
+
+import json
+import shutil
+import sys
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN.parent / "lib"))
+from party import Project, die  # noqa: E402
+
+
+def main(argv):
+    if len(argv) != 1:
+        die(__doc__.strip())
+    source = Path(argv[0]).resolve()
+    if not source.is_dir():
+        die(f"{source} isn't a folder")
+    project = Project()
+    project.jobs.mkdir(parents=True, exist_ok=True)
+    imported, skipped = [], []
+    for folder in sorted(p for p in source.iterdir() if (p / "job.json").exists()):
+        target = project.jobs / folder.name
+        if target.exists():
+            skipped.append(folder.name)
+            continue
+        shutil.copytree(folder, target, ignore=shutil.ignore_patterns(".lock", "*.tmp"))
+        job = json.loads((target / "job.json").read_text())
+        job.setdefault("repo", str(project.repo))
+        job.setdefault("reviewed_commit", None)
+        (target / "job.json").write_text(json.dumps(job, indent=2) + "\n")
+        imported.append(folder.name)
+    print(f"imported {len(imported)} jobs into {project.jobs}" + (f", skipped {len(skipped)} already there" if skipped else ""))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

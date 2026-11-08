@@ -53,6 +53,9 @@ A project needs one thing: a checks script the gate runs on every round.
                  ## UI review, ## UX review, ## Approver
 ```
 
+Coming from a factory that lived in the repo (`factory/jobs/`)? `party-import factory/jobs`
+brings its jobs over, and numbering continues after them.
+
 `party-job where` shows which project, state folder, settings and checks the
 factory found. Settings are layered: the plugin's `config.default.json`, then
 `.factory/config.json`, then `~/.cloudfest-after-party/projects/<slug>/config.json`
