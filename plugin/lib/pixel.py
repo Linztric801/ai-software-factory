@@ -267,10 +267,22 @@ def runs(cells):
 # ---- The cast: eight agents by role, two cameo hosts --------------------------
 
 
-def sprite_at(x, y, svg, label, anim=None, id_=None):
+def sprite_at(x, y, svg, label, anim=None, id_=None, job=None):
+    """A character; with a job id it is a link that opens that job's status."""
     a = f' class="bob {anim}"' if anim else ""
+    inner = f'<g transform="translate({x} {y})"><g{a}><title>{escape(label)}</title>{svg}</g></g>'
+    if id_ and job:
+        return (f'<a id="{escape(id_)}" class="actor" href="#job={escape(job)}" data-job="{escape(job)}" '
+                f'aria-label="{escape(label)}">{inner}</a>')
     tag = f' id="{escape(id_)}" class="actor" tabindex="0" aria-label="{escape(label)}"' if id_ else ""
     return f'<g transform="translate({x} {y})"{tag}><g{a}><title>{escape(label)}</title>{svg}</g></g>'
+
+
+def step_plate(x, y, label, size=3.2):
+    """The pipeline step a place stands for, on a small plate beside its sign."""
+    w = round(len(label) * size * 0.62 + 5)
+    return (rect(x - 1, y - 1, w + 2, 7, cls("o")) + rect(x, y, w, 5, cls("black", 2))
+            + text(x + 2.5, y + 4, label, size, "sign-cyan"))
 
 
 def nametag(cx, y, label, size=3.3):

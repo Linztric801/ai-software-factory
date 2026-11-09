@@ -16,7 +16,7 @@ from pathlib import Path
 
 import xp
 from pixel import (bubble, box, chibi, cloud, cls, css_classes, css_tokens, nametag, rect,
-                   sprite_at, status_marker, text, tip, tip_rule)
+                   sprite_at, status_marker, step_plate, text, tip, tip_rule)
 
 PLUGIN = Path(__file__).resolve().parents[1]
 THEMES = PLUGIN / "themes"
@@ -42,7 +42,7 @@ ZONES = {  # key: (x, y, w, h) on the 240x180 map
     "masterclass": (6, 8, 58, 62),
     "venue": (72, 8, 96, 62),
     "arena": (176, 8, 58, 62),
-    "plaza": (96, 76, 48, 26),
+    "plaza": (72, 76, 72, 26),
     "tower": (150, 76, 22, 26),
     "pavilions": (6, 110, 58, 62),
     "beerfest": (72, 110, 84, 62),
@@ -52,13 +52,27 @@ SPOTS = {  # where characters stand in each zone (x, y of the 14x18 sprite)
     "masterclass": [(30, 35), (12, 35), (46, 35)],
     "venue": [(80, 36), (130, 36), (106, 50)],
     "arena": [(180, 30), (218, 30), (199, 46), (190, 46)],
-    "plaza": [(128, 86), (112, 86)],
+    "plaza": [(128, 86), (112, 86), (96, 86), (80, 86)],  # from the right, clear of the sign first
     "tower": [(154, 80)],
     "pavilions": [(34, 132)],
     "beerfest": [(84, 135), (100, 150)],
     "suite": [(170, 121), (186, 121), (202, 121), (218, 121), (170, 141), (186, 141), (202, 141), (218, 141)],
 }
 WORKING = {"Working", "Testing", "Analysing", "Deciding"}
+STEPS = {  # the pipeline step each place stands for, shown on the map beside its sign
+    "masterclass": "INTAKE",
+    "pavilions": "SPEC",
+    "venue": "BUILD",
+    "arena": "GATE",
+    "plaza": "REVIEW",
+    "tower": "APPROVE",
+    "beerfest": "YOUR CALL",
+    "suite": "IDLE",
+}
+STAGE_LABEL = {"intake": "Intake", "needs-info": "Asked the author", "spec": "Spec", "build": "Build",
+               "gate": "Gate", "review": "Review", "approve": "Approve", "merging": "Merging",
+               "needs-human": "Your call", "awaiting-approval": "Awaiting approval",
+               "merged": "Merged", "rejected": "Rejected"}
 
 
 HANDLE = re.compile(r"^[A-Za-z0-9_-]{1,39}$")
@@ -110,6 +124,54 @@ def issue_ref(job):
     return f"#{job['issue']}"
 
 
+def safe_url(url):
+    """Only https links reach an href; anything else is shown as text."""
+    return url if isinstance(url, str) and url.startswith("https://") else None
+
+
+def ext_link(url, label):
+    url = safe_url(url)
+    if not url:
+        return f"<span>{escape(label)}</span>"
+    return f'<a href="{escape(url)}" target="_blank" rel="noopener noreferrer">{escape(label)}</a>'
+
+
+def job_links(job):
+    """The issue and the PR, each a link when its URL is known."""
+    out = [ext_link(job.get("issue_url"), f"issue #{job['issue']}")]
+    if job.get("pr"):
+        out.append(ext_link(job.get("pr_url"), f"PR #{job['pr']}"))
+    return "".join(out)
+
+
+def open_job(job, inner):
+    """A link that opens the job's status panel; the page's script does the opening."""
+    jid = escape(job["id"])
+    return f'<a class="job-open" href="#job={jid}" data-job="{jid}">{inner}</a>'
+
+
+def model_of(job, agent):
+    reviewers = (job.get("agents") or {}).get("reviewers") or {}
+    return reviewers.get(agent) or ("opus" if agent in ("intake", "spec", "builder", "approver") else "")
+
+
+def verdict_chips(job):
+    """The current round as chips: the gate, then each routed reviewer."""
+    if not job.get("round"):
+        return ""
+
+    def chip(label, v, title):
+        v = v or "pending"
+        tone = v if v in ("PASS", "CHANGES", "FAIL") else "pending"
+        return f'<span class="chip chip-{tone.lower()}" title="{escape(title)}: {escape(v)}">{escape(label)}</span>'
+    cells = [chip("gate", job.get("gate"), "gate")]
+    if job.get("gate") == "PASS":
+        short = {"security": "sec"}
+        for r, v in (job.get("reviews") or {}).items():
+            cells.append(chip(short.get(r, r), v, f"{r} review"))
+    return f'<span class="chips"><span class="chip-round">R{job["round"]}</span>{"".join(cells)}</span>'
+
+
 def people_for(names, theme):
     """Display names for the people an approval names (theme people, or the raw handle)."""
     people = theme.get("people", {})
@@ -131,9 +193,9 @@ def derive(jobs, settings, theme):
         if st == "intake":
             add("intake", "masterclass", "Analysing", f"reading {ref}", job)
         elif st == "needs-info":
-            add("intake", "plaza", "Waiting for the author", f"a question on {ref}", job, f"Question on {ref}")
+            add("intake", "masterclass", "Waiting for the author", f"a question on {ref}", job, f"Question on {ref}")
         elif st == "spec":
-            add("spec", "masterclass", "Analysing", f"spec for {ref}", job)
+            add("spec", "pavilions", "Analysing", f"spec for {ref}", job)
         elif st == "build":
             add("builder", "venue", "Working", f"building {ref}", job)
         elif st == "gate":
@@ -141,11 +203,11 @@ def derive(jobs, settings, theme):
         elif st == "review":
             for r, verdict in (job.get("reviews") or {}).items():
                 if verdict == "pending" and r in AGENT:
-                    add(r, "arena", "Testing", f"reviewing {ref}", job)
+                    add(r, "plaza", "Testing", f"reviewing {ref}", job)
         elif st == "approve":
-            add("approver", "venue", "Deciding", f"deciding {ref}", job)
+            add("approver", "tower", "Deciding", f"deciding {ref}", job)
         elif st == "merging":
-            add("approver", "venue", "Working", f"merging {ref}", job)
+            add("approver", "tower", "Working", f"merging {ref}", job)
         elif st == "awaiting-approval":
             who = " and ".join(named) if named else "a person"
             say = f"Waiting for {named[0]}" if len(named) == 1 else (f"Waiting for {len(named)} people" if named else "Waiting for a person")
@@ -158,8 +220,20 @@ def derive(jobs, settings, theme):
     for k in AGENT:
         items = work[k]
         if not items:
-            agents[k] = {"zone": "suite", "state": "Idle", "why": "free for a quest", "jobs": [], "say": ""}
+            agents[k] = {"zone": "suite", "state": "Idle", "why": "free for a quest", "jobs": [], "say": "",
+                         "places": [{"zone": "suite", "state": "Idle", "why": "free for a quest", "jobs": [], "say": ""}]}
             continue
+        # One figure per place the agent has work in, so a job that is building and one at
+        # the gate show the builder in both places, as the old office's clones did.
+        by_zone = {}
+        for item in sorted(items, key=lambda i: 0 if i[1].startswith("Waiting") else 1):
+            by_zone.setdefault(item[0], []).append(item)
+        places = []
+        for zone, group in by_zone.items():
+            _, pstate, pwhy, _, psay = group[0]
+            more = len(group) - 1
+            places.append({"zone": zone, "state": pstate, "why": f"{pwhy} and {more} more" if more else pwhy,
+                           "jobs": [i[3] for i in group], "say": f"{psay} +{more}" if more else psay})
         # A waiting job outranks running ones: it needs a person.
         items.sort(key=lambda i: 0 if i[1].startswith("Waiting") else 1)
         zone, state, why, _, say = items[0]
@@ -170,7 +244,8 @@ def derive(jobs, settings, theme):
                 say = say.replace("Waiting for", f"{len(waiting_items)} PRs wait for", 1)
             else:
                 say = f"{say} +{len(items) - 1}"
-        agents[k] = {"zone": zone, "state": state, "why": why, "jobs": [i[3] for i in items], "say": say}
+        agents[k] = {"zone": zone, "state": state, "why": why, "jobs": [i[3] for i in items], "say": say,
+                     "places": places}
     stages = Counter(j["stage"] for j in jobs)
     running = sum(n for s, n in stages.items() if s in {"intake", "spec", "build", "gate", "review", "approve", "merging"})
     waiting = [j for j in jobs if j["stage"] in ("needs-human", "awaiting-approval")]
@@ -221,20 +296,37 @@ def world_map(world, theme, project="project"):
         sy = y + 2 if h < 40 else y + h - 9
         s.append(box(x + 2, sy, round(len(label) * 3 * 0.85) + 6, 7, "wood"))
         s.append(text(x + 5, sy + 5, label, 4.2))
+        if key in STEPS:
+            s.append(step_plate(x + 2, y - 6, STEPS[key]))  # a tab on the path above the place
     used, tips, tags, bubbles, rules = Counter(), [], [], [], []
-    for k, (name, role, kw) in AGENT.items():
-        a = world["agents"][k]
+    said = set()  # one bubble per place and line: four reviewers on one job share it
+    figures = [(k, n, a) for k in AGENT for n, a in enumerate(world["agents"][k].get("places") or [world["agents"][k]])]
+    for k, n, a in figures:
+        name, _, kw = AGENT[k]
+        mid = f"map-{k}" if n == 0 else f"map-{k}-{n}"
         spots = SPOTS[a["zone"]]
         sx, sy = spots[used[a["zone"]] % len(spots)]
         used[a["zone"]] += 1
         anim = "idle" if a["state"] == "Idle" else ("work" if a["state"] in WORKING else None)
-        s.append(sprite_at(sx, sy, chibi(**kw), f"{name}: {a['state']}, {a['why']}", anim, id_=f"map-{k}"))
+        job = a["jobs"][0] if a["jobs"] else None
+        s.append(sprite_at(sx, sy, chibi(**kw), f"{name}: {a['state']}, {a['why']}", anim, id_=mid,
+                           job=job["id"] if job else None))
         s.append(status_marker(sx, sy, "Working" if a["state"] in WORKING else a["state"]))
-        tips.append(tip(f"map-{k}", sx + 7, sy - 7, [name, a["state"]]))
-        rules.append(tip_rule(f"map-{k}", k))
+        if job:
+            model = model_of(job, k)
+            title = job["title"] if len(job["title"]) <= 40 else job["title"][:39] + "…"
+            pr = f", PR #{job['pr']}" if job.get("pr") else ""
+            lines = [f"{name}{' · ' + model if model else ''}",
+                     f"{STAGE_LABEL.get(job['stage'], job['stage'])}, round {job.get('round') or 0}",
+                     f"#{job['issue']}{pr}", title, "Click for status and PR"]
+        else:
+            lines = [name, a["state"]]
+        tips.append(tip(mid, sx + 7, sy - 7, lines))
+        rules.append(tip_rule(mid, k))
         if a["zone"] != "suite":  # the suite is a crowd; hover tells who is who
             tags.append(nametag(sx + 7, sy + 19, SHORT[k]))
-        if a["state"] != "Idle":
+        if a["state"] != "Idle" and (a["zone"], a["say"]) not in said:
+            said.add((a["zone"], a["say"]))
             bubbles.append(bubble(sx + 7, sy - 7, a["say"][:24], "task", shift=-6 if a["zone"] == "plaza" else 0))
         elif used["suite"] == 1 and sum(1 for x in world["agents"].values() if x["state"] == "Idle") <= 2:
             bubbles.append(bubble(sx + 7, sy - 2, ambient(theme, 0), "ambient"))
@@ -540,7 +632,10 @@ def regions(jobs, settings, theme, project, demo=False):
     who = "".join(
         f'<li data-agent="{k}"><span class="who-avatar">{avatar(kw, name)}</span><span><strong>{escape(name)}</strong>'
         f'<span class="state state-{escape(world["agents"][k]["state"].split()[0].lower())}">{escape(world["agents"][k]["state"])}</span>'
-        f'<span class="where">{escape(place(theme, world["agents"][k]["zone"]))}, {escape(world["agents"][k]["why"])}</span></span></li>'
+        f'<span class="where">{escape(place(theme, world["agents"][k]["zone"]))}, '
+        + (open_job(world["agents"][k]["jobs"][0], escape(world["agents"][k]["why"])) if world["agents"][k]["jobs"]
+           else escape(world["agents"][k]["why"]))
+        + '</span></span></li>'
         for k, (name, role, kw) in AGENT.items())
     waiting = world["waiting"]
     names = [person_sprite(theme, p)[0] for p in world["approvers"]]
@@ -558,8 +653,8 @@ def regions(jobs, settings, theme, project, demo=False):
             f'<p class="note">{escape(project)}: {st["jobs"]} jobs{". Demo data, not a real project" if demo else ""}.</p>')
 
     def job_line(j):
-        pr = f' <a href="{escape(j["pr_url"])}">PR #{j["pr"]}</a>' if j.get("pr_url") else ""
-        return f'<li><strong>{escape(j["title"])}</strong> (#{j["issue"]}){pr}</li>'
+        title = open_job(j, f'<strong>{escape(j["title"])}</strong>')
+        return f'<li>{title} <span class="links">{job_links(j)}</span></li>'
 
     who_text = " and ".join(names) if names else "A person"
     bierfest = (
@@ -585,8 +680,22 @@ def regions(jobs, settings, theme, project, demo=False):
                ("Waiting for a person", ["needs-human", "awaiting-approval"]), ("Done", ["merged"]), ("Rejected", ["rejected"])]
     def card(j):
         tone = " tone-human" if j["stage"] in ("needs-human", "awaiting-approval") else ""
-        return (f'<li class="quest{tone}"><span class="quest-title">{escape(j["title"])}</span>'
-                f'<span class="quest-meta">#{j["issue"]}, {escape(j["stage"])}, round {j["round"]}</span></li>')
+        num = escape(j["id"].split("-")[0])
+        risk = (j.get("intake") or {}).get("risk")
+        meta = [num, escape(STAGE_LABEL.get(j["stage"], j["stage"]))]
+        if j.get("round"):
+            meta.append(f'round {j["round"]}')
+        if risk:
+            meta.append(f"{escape(str(risk))} risk")
+        hint = ""
+        if j["stage"] == "needs-human":
+            first = f'Merge PR #{j["pr"]} to approve, or give' if j.get("pr") else "Give"
+            hint = f'<span class="quest-hint">{first} feedback with /cloudfest:after-party</span>'
+        elif j["stage"] == "awaiting-approval":
+            hint = f'<span class="quest-hint">A person approves: party-job approve {num}, or merge the PR</span>'
+        title = open_job(j, f'<span class="quest-title">{escape(j["title"])}</span>')
+        return (f'<li class="quest{tone}">{title}<span class="quest-meta">{" · ".join(meta)}</span>'
+                f'<span class="links">{job_links(j)}</span>{verdict_chips(j)}{hint}</li>')
     board = "".join(
         f'<section class="column" aria-label="{name}"><div class="column-head"><h3>{name}</h3>'
         f'<span class="count num">{sum(1 for j in jobs if j["stage"] in stages)}</span></div>'
@@ -627,11 +736,14 @@ def regions(jobs, settings, theme, project, demo=False):
         for p in theme.get("people", {}).values())
 
     rows = "".join(
-        f'<tr><td>{escape(j["id"])}</td><td>{escape(j["title"])}</td><td>{escape(j["stage"])}</td><td class="num">{j["round"]}</td>'
-        f'<td class="num">{"#" + str(j["pr"]) if j.get("pr") else "none"}</td><td class="num">${(j.get("cost_usd") or 0):.2f}</td></tr>'
+        f'<tr><td>{open_job(j, escape(j["id"]))}</td><td>{escape(j["title"])}</td>'
+        f'<td>{escape(STAGE_LABEL.get(j["stage"], j["stage"]))}</td><td class="num">{j["round"]}</td>'
+        f'<td class="num">{ext_link(j.get("pr_url"), "#" + str(j["pr"])) if j.get("pr") else "none"}</td>'
+        f'<td class="num">{ext_link(j.get("issue_url"), "#" + str(j["issue"]))}</td>'
+        f'<td class="num">${(j.get("cost_usd") or 0):.2f}</td></tr>'
         for j in sorted(jobs, key=lambda j: j["id"], reverse=True)[:12])
     ops = (f'<table class="ops"><thead><tr><th scope="col">Job</th><th scope="col">Title</th><th scope="col">Stage</th>'
-           f'<th scope="col" class="num">Round</th><th scope="col" class="num">PR</th><th scope="col" class="num">Cost</th></tr></thead>'
+           f'<th scope="col" class="num">Round</th><th scope="col" class="num">PR</th><th scope="col" class="num">Issue</th><th scope="col" class="num">Cost</th></tr></thead>'
            f'<tbody>{rows}</tbody></table>' if jobs else '<p class="empty">No jobs yet.</p>')
     return {
         "r-world": world_map(world, theme, project),
@@ -647,6 +759,180 @@ def regions(jobs, settings, theme, project, demo=False):
         "r-popup": popup,
         "r-count": str(len(waiting)) if waiting else "",
     }
+
+
+# ---- The job panel: one job's status, links and files ---------------------------------
+
+DRAWER_HTML = """<dialog class="drawer" id="job-drawer" aria-labelledby="d-title">
+  <div class="d-head">
+    <p class="d-num" id="d-num"></p>
+    <h2 id="d-title"></h2>
+    <p class="links" id="d-links"></p>
+    <form method="dialog"><button class="d-close" type="submit" aria-label="Close">×</button></form>
+  </div>
+  <div class="d-body">
+    <nav class="d-files" id="d-files" aria-label="The job's files"></nav>
+    <article class="d-doc"><div class="md" id="d-doc"></div></article>
+  </div>
+</dialog>"""
+
+# Reads the same /jobs/ files the factory writes: job.json for the header, the folder
+# listing for the files, each file's first line for its verdict colour. Agent-written
+# markdown is escaped before anything is rendered; links keep only https and relative URLs.
+DRAWER_JS = r"""
+const drawer = document.getElementById('job-drawer')
+const $d = id => document.getElementById(id)
+const escH = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+const STAGE = { intake: 'Intake', 'needs-info': 'Asked the author', spec: 'Spec', build: 'Build', gate: 'Gate', review: 'Review', approve: 'Approve', merging: 'Merging', 'needs-human': 'Your call', 'awaiting-approval': 'Awaiting approval', merged: 'Merged', rejected: 'Rejected' }
+let openId = null, openPath = null, openText
+const firstLines = new Map()
+const getText = async url => { const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.text() }
+const safe = u => /^https:\/\//.test(u || '') ? u : null
+const ext = (u, label) => safe(u) ? `<a href="${escH(u)}" target="_blank" rel="noopener noreferrer">${escH(label)}</a>` : `<span>${escH(label)}</span>`
+async function listFiles(dir) {
+  const doc = new DOMParser().parseFromString(await getText(dir), 'text/html')
+  const out = []
+  for (const a of doc.querySelectorAll('a')) {
+    const h = decodeURIComponent(a.getAttribute('href'))
+    if (h.endsWith('/')) out.push(...(await listFiles(dir + h)).map(f => h + f))
+    else if (h.endsWith('.md')) out.push(h)
+  }
+  return out
+}
+const ORDER = ['issue.md', 'intake.md', 'spec.md', 'build.md', 'decision.md', 'rejection.md']
+const ROUND_ORDER = ['checks', 'review-code', 'review-security', 'review-ux', 'review-ui', 'merge-checks']
+function rank(f) {
+  if (ORDER.includes(f)) return [0, ORDER.indexOf(f), f]
+  const m = f.match(/^round-(\d+)\/(.+)\.md$/)
+  if (m) return [2, Number(m[1]) * 10 + ROUND_ORDER.indexOf(m[2]), f]
+  return [1, 0, f]
+}
+const sortFiles = fs => fs.sort((a, b) => { const [x, y] = [rank(a), rank(b)]; return x[0] - y[0] || x[1] - y[1] || x[2].localeCompare(y[2]) })
+function tone(first) {
+  if (/^(VERDICT:\s*PASS|GATE:\s*PASS|APPROVE|STATUS:\s*READY|DECISION:\s*ACCEPT)$/.test(first)) return 'good'
+  if (/^(VERDICT:\s*CHANGES|DECISION:\s*NEEDS-INFO)$/.test(first)) return 'warn'
+  if (/^(ESCALATE|REJECTED|STATUS:\s*BLOCKED|GATE:\s*FAIL|DECISION:\s*REJECT)$/.test(first)) return 'stop'
+  return ''
+}
+function inline(s) {
+  const codes = []
+  s = escH(s).replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`)
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\(((?:https:\/\/|\.{0,2}\/|#)[^)\s]*)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`)
+}
+function splitSummary(lines) {
+  const start = lines.findIndex(l => /^##\s+Summary\s*$/.test(l))
+  if (start === -1) return { lines, summary: null }
+  let end = start + 1
+  while (end < lines.length && !/^#{1,2}\s/.test(lines[end])) end++
+  return { lines: [...lines.slice(0, start), ...lines.slice(end)], summary: lines.slice(start + 1, end).join('\n') }
+}
+function markdown(src) {
+  const split = splitSummary(src.replace(/\r/g, '').split('\n'))
+  const lines = split.lines
+  let i = 0, html = ''
+  const first = (lines[0] || '').trim(), t = tone(first)
+  if (t) {
+    html += `<div class="verdict ${t}">${escH(first)}</div>`
+    i = 1
+    const extra = []
+    while (i < lines.length && /^[A-Z-]+:\s/.test(lines[i])) extra.push(lines[i++])
+    if (extra.length) html += `<pre class="head">${escH(extra.join('\n'))}</pre>`
+  }
+  if (split.summary !== null) html += `<section class="summary"><h3>Summary</h3>${markdown(split.summary)}</section>`
+  const isList = l => /^\s*([-*+]|\d+\.)\s+/.test(l)
+  const isBlock = l => /^(#{1,6}\s|```|\s*>|\|)/.test(l) || isList(l)
+  while (i < lines.length) {
+    const line = lines[i]
+    if (!line.trim()) { i++; continue }
+    if (line.startsWith('```')) {
+      const body = []; i++
+      while (i < lines.length && !lines[i].startsWith('```')) body.push(lines[i++])
+      i++; html += `<pre><code>${escH(body.join('\n'))}</code></pre>`; continue
+    }
+    const h = line.match(/^(#{1,6})\s+(.*)$/)
+    if (h) { const n = Math.min(h[1].length + 1, 5); html += `<h${n}>${inline(h[2])}</h${n}>`; i++; continue }
+    if (/^\s*>/.test(line)) {
+      const body = []
+      while (i < lines.length && /^\s*>/.test(lines[i])) body.push(lines[i++].replace(/^\s*>\s?/, ''))
+      html += `<blockquote>${markdown(body.join('\n'))}</blockquote>`; continue
+    }
+    if (line.startsWith('|')) {
+      const rows = []
+      while (i < lines.length && lines[i].startsWith('|')) rows.push(lines[i++])
+      const cells = r => r.replace(/^\||\|$/g, '').split('|').map(c => inline(c.trim()))
+      const body = rows.filter(r => !/^\|[\s:|-]+\|$/.test(r))
+      html += '<table>' + body.map((r, n) => `<tr>${cells(r).map(c => n ? `<td>${c}</td>` : `<th>${c}</th>`).join('')}</tr>`).join('') + '</table>'
+      continue
+    }
+    if (isList(line)) {
+      const ordered = /^\s*\d+\./.test(line), items = []
+      while (i < lines.length && (isList(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && items.length))) {
+        const l = lines[i++]
+        if (isList(l)) items.push({ indent: l.match(/^\s*/)[0].length, text: l.replace(/^\s*([-*+]|\d+\.)\s+/, '') })
+        else items[items.length - 1].text += ' ' + l.trim()
+      }
+      const lis = items.map(({ indent, text }) => `<li${indent ? ` style="margin-left:${indent * 0.6}em"` : ''}>${inline(text)}</li>`).join('')
+      html += ordered ? `<ol>${lis}</ol>` : `<ul>${lis}</ul>`; continue
+    }
+    const para = []
+    while (i < lines.length && lines[i].trim() && !isBlock(lines[i])) para.push(lines[i++])
+    html += `<p>${inline(para.join(' '))}</p>`
+  }
+  return html
+}
+async function refreshDrawer() {
+  if (!openId) return
+  const base = `jobs/${encodeURIComponent(openId)}/`
+  let job
+  try { job = JSON.parse(await getText(base + 'job.json')) } catch (e) {
+    $d('d-num').textContent = openId; $d('d-title').textContent = 'No job files here'
+    $d('d-links').innerHTML = ''; $d('d-files').innerHTML = ''
+    $d('d-doc').innerHTML = '<p class="note">This view has no job files (demo mode, or the job was removed).</p>'
+    return
+  }
+  const cost = Number(job.cost_usd || 0).toFixed(2)
+  $d('d-num').textContent = `${job.id} · ${STAGE[job.stage] || job.stage}${job.round ? ` · round ${job.round}` : ''} · $${cost}`
+  $d('d-title').textContent = job.title
+  $d('d-links').innerHTML = ext(job.issue_url, `issue #${job.issue}`) + (job.pr ? ext(job.pr_url, `PR #${job.pr}`) : '')
+  const files = sortFiles(await listFiles(base))
+  if (!openPath || !files.includes(openPath)) openPath = files.includes('decision.md') ? 'decision.md' : files.includes('build.md') ? 'build.md' : files[0] || null
+  let text = null
+  if (openPath) { text = await getText(base + openPath); firstLines.set(base + openPath, text.split('\n')[0].trim()) }
+  await Promise.all(files.filter(f => !firstLines.has(base + f)).map(async f => firstLines.set(base + f, (await getText(base + f)).split('\n')[0].trim())))
+  let group = null
+  $d('d-files').innerHTML = files.map(f => {
+    const g = f.includes('/') ? f.split('/')[0].replace('round-', 'Round ') : 'Job'
+    const head = g !== group ? `<p class="group">${escH(g)}</p>` : ''
+    group = g
+    const name = f.includes('/') ? f.split('/')[1].replace(/^review-|\.md$/g, '') : f.replace(/\.md$/, '')
+    return `${head}<button type="button" class="file${f === openPath ? ' on' : ''}" data-file="${escH(f)}"><span class="v ${tone(firstLines.get(base + f) || '')}"></span>${escH(name)}</button>`
+  }).join('') || '<p class="note">No files yet.</p>'
+  if (text !== openText) { openText = text; $d('d-doc').innerHTML = text === null ? '<p class="note">Intake hasn’t written anything yet.</p>' : markdown(text) }
+}
+async function openDrawer(id) {
+  openId = id; openPath = null; openText = undefined
+  if (!drawer.open) drawer.showModal()
+  try { await refreshDrawer() } catch (e) { $d('d-doc').innerHTML = `<p class="note">${escH(e.message)}</p>` }
+}
+drawer.addEventListener('close', () => { openId = null; if (/^#job=/.test(location.hash)) history.replaceState(null, '', location.pathname) })
+drawer.addEventListener('click', e => { if (e.target === drawer) drawer.close() })
+document.addEventListener('click', e => {
+  const file = e.target.closest('[data-file]')
+  if (file) { openPath = file.dataset.file; openText = undefined; $d('d-doc').parentElement.scrollTop = 0; refreshDrawer(); return }
+  const link = e.target.closest('[data-job]')
+  if (link) { e.preventDefault(); openDrawer(link.dataset.job) }
+})
+const fromHash = () => {
+  const m = location.hash.match(/^#job=(.+)$/)
+  if (m) openDrawer(decodeURIComponent(m[1]))
+  else if (drawer.open) drawer.close()  // switching views closes the job
+}
+addEventListener('hashchange', fromHash); fromHash()
+setInterval(() => { if (openId) refreshDrawer().catch(() => {}) }, 4000)
+"""
 
 
 def page(jobs, settings, theme, project, demo=False, refresh_ms=3000):
@@ -727,7 +1013,8 @@ def page(jobs, settings, theme, project, demo=False, refresh_ms=3000):
 </div></section>
 </main>
 <div id="r-popup">{r["r-popup"]}</div>
-<script>
+{DRAWER_HTML}
+<script>{DRAWER_JS}
   const tabs = document.querySelectorAll('.bar nav a')
   const mark = () => tabs.forEach(a => a.toggleAttribute('aria-current', a.hash === (location.hash || '#world')))
   addEventListener('hashchange', mark); mark()

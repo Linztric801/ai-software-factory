@@ -1017,20 +1017,20 @@ class World(unittest.TestCase):
 
     def test_every_stage_puts_its_agent_in_the_right_place(self):
         cases = {"intake": ("intake", "masterclass", "Analysing"),
-                 "spec": ("spec", "masterclass", "Analysing"),
+                 "spec": ("spec", "pavilions", "Analysing"),
                  "build": ("builder", "venue", "Working"),
                  "gate": ("builder", "arena", "Testing"),
-                 "approve": ("approver", "venue", "Deciding"),
-                 "merging": ("approver", "venue", "Working"),
+                 "approve": ("approver", "tower", "Deciding"),
+                 "merging": ("approver", "tower", "Working"),
                  "needs-human": ("approver", "beerfest", "Waiting for approval"),
-                 "needs-info": ("intake", "plaza", "Waiting for the author")}
+                 "needs-info": ("intake", "masterclass", "Waiting for the author")}
         for stage, (agent, zone, state) in cases.items():
             a = self.where(self.job(stage))[agent]
             self.assertEqual((a["zone"], a["state"]), (zone, state), stage)
 
-    def test_only_pending_reviewers_walk_to_the_arena(self):
+    def test_only_pending_reviewers_walk_to_the_review_plaza(self):
         a = self.where(self.job("review", reviews={"code": "PASS", "ui": "pending"}))
-        self.assertEqual(a["ui"]["zone"], "arena")
+        self.assertEqual(a["ui"]["zone"], "plaza")
         self.assertEqual(a["code"]["zone"], "suite")
 
     def test_idle_agents_rest_in_the_suite_and_finished_jobs_move_nobody(self):
@@ -1067,6 +1067,42 @@ class World(unittest.TestCase):
         for bad in ("../cloudfest", "/etc", "Cloud Fest", "missing-theme"):
             with self.assertRaises(ValueError, msg=bad):
                 self.world.load_theme(bad)
+
+    def test_jobs_link_to_their_status_issue_and_pr(self):
+        j = self.job("review", pr=12, pr_url="https://github.com/o/r/pull/12",
+                     reviews={"code": "PASS", "ui": "pending"})
+        j.update(issue_url="https://github.com/o/r/issues/7", gate="PASS", agents={"reviewers": {"ui": "haiku"}})
+        r = self.world.regions([j], {}, self.theme, "p")
+        for region in ("r-quests", "r-ops"):
+            self.assertIn('data-job="001-review"', r[region], region)
+            self.assertIn('href="https://github.com/o/r/pull/12"', r[region], region)
+        self.assertIn('href="https://github.com/o/r/issues/7"', r["r-quests"])
+        self.assertIn('title="code review: PASS"', r["r-quests"])
+        self.assertIn('href="#job=001-review"', r["r-world"], "the reviewer on the map opens the job")
+        self.assertIn("UI reviewer · haiku", r["r-world"])
+        self.assertIn('data-job="001-review"', r["r-side"])
+        html = self.world.page([j], {}, self.theme, "p")
+        self.assertIn('id="job-drawer"', html)
+
+    def test_the_map_names_each_pipeline_step(self):
+        svg = self.world.regions([], {}, self.theme, "p")["r-world"]
+        for step in ("INTAKE", "SPEC", "BUILD", "GATE", "REVIEW", "APPROVE", "YOUR CALL"):
+            self.assertIn(step, svg)
+
+    def test_an_agent_with_work_in_two_places_stands_in_both(self):
+        a = self.where(self.job("build"), dict(self.job("gate"), id="002-gate"))["builder"]
+        self.assertEqual([p["zone"] for p in a["places"]], ["venue", "arena"])
+        svg = self.world.regions([self.job("build"), dict(self.job("gate"), id="002-gate")], {}, self.theme, "p")["r-world"]
+        self.assertIn('id="map-builder"', svg)
+        self.assertIn('id="map-builder-1"', svg)
+
+    def test_only_https_links_reach_an_href(self):
+        j = self.job("needs-human", pr=3, pr_url="javascript:alert(1)")
+        j["issue_url"] = "data:text/html,x"
+        blob = json.dumps(self.world.regions([j], {}, self.theme, "p"))
+        self.assertNotIn("javascript:", blob)
+        self.assertNotIn("data:text", blob)
+        self.assertIn("PR #3", blob)
 
     def test_a_parked_job_waits_at_the_bierfest(self):
         a = self.where(self.job("awaiting-approval", pr=3), approvers=["yusuf"])["approver"]
