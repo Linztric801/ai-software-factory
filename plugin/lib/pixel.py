@@ -121,7 +121,8 @@ BASE = [  # anime chibi, 12x16: big head, big eyes with a highlight, blush, smal
 ]
 
 
-def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="front", eyes="navy", shirt=False, beard=False):
+def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="front", eyes="navy", shirt=False, beard=False,
+          lanyard=None):
     accs = acc if isinstance(acc, tuple) else (acc,)
     g = [list("." + row + ".") for row in BASE]
     g.insert(0, list("." * 14))
@@ -142,6 +143,14 @@ def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="fr
             put(r, 12, "H")
     if style == "long":
         for r in range(9, 15):
+            put(r, 1, "H")
+            put(r, 12, "H")
+    if style == "curly":   # a bumpy top and fuller sides
+        for c in (2, 3, 10, 11):
+            put(1, c, "H")
+        for c in (4, 6, 8):
+            put(0, c, "H")
+        for r in range(5, 9):
             put(r, 1, "H")
             put(r, 12, "H")
     if style == "twin":
@@ -165,6 +174,27 @@ def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="fr
             put(1, c, "A")
         for c in range(1, 13):
             put(2, c, "A")
+    if "headband" in accs:  # a dark band across the forehead
+        for c in range(1, 13):
+            put(4, c, "A")
+    if "headshades" in accs:  # sunglasses pushed up on the head
+        for c in (3, 4, 5, 8, 9, 10):
+            put(2, c, "E")
+        put(2, 6, "E")
+        put(2, 7, "E")
+    if "goggles" in accs:   # coloured glasses pushed up on the head
+        for c in (3, 4, 5, 8, 9, 10):
+            put(2, c, "C")
+        put(2, 6, "E")
+        put(2, 7, "E")
+    if "shades" in accs:    # sunglasses over both eyes
+        for r in (7, 8):
+            for c in (2, 3, 4, 9, 10, 11):
+                put(r, c, "E")
+        put(7, 5, "E")
+        put(7, 8, "E")
+        put(7, 6, "E")
+        put(7, 7, "E")
     if "glasses" in accs:   # frames beside both eyes and a bridge
         for r in (7, 8):
             for c in (2, 5, 8, 11):
@@ -187,6 +217,14 @@ def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="fr
         for r in range(12, 15):
             put(r, 6, "K")
             put(r, 7, "K")
+    if lanyard and pose != "back":  # a lanyard from the neck and the red-topped festival badge
+        for r in (12, 13):
+            put(r, 5, "N")
+            put(r, 8, "N")
+        put(14, 6, "Q")
+        put(14, 7, "Q")
+        put(15, 6, "G")
+        put(15, 7, "G")
     if beard and pose != "back":   # short beard along the jaw and chin
         for c in range(3, 11):
             if g[10][c] == "S":
@@ -209,9 +247,10 @@ def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="fr
                     g[r][c] = "H"
         put(8, 1, "S")
 
-    palette = {"H": hair, "S": skin, "T": top, "L": legs, "A": acc_colour(next((a for a in accs if a not in ("glasses", "peace", "wave")), None)), "E": "o", "O": "o",
-               "W": "white", "I": eyes, "B": "pink", "M": "coral", "K": shirt if isinstance(shirt, str) else "white", "D": hair}
-    fixed = {"W": 0, "I": 2, "B": 0, "M": 2, "K": 1, "D": 2}
+    palette = {"H": hair, "S": skin, "T": top, "L": legs, "A": acc_colour(next((a for a in accs if a not in ("glasses", "peace", "wave", "shades", "headshades", "goggles")), None)), "E": "o", "O": "o",
+               "W": "white", "I": eyes, "B": "pink", "M": "coral", "K": shirt if isinstance(shirt, str) else "white", "D": hair,
+               "C": "cyan", "N": lanyard or "black", "Q": "pinkb", "G": "white"}
+    fixed = {"W": 0, "I": 2, "B": 0, "M": 2, "K": 1, "D": 2, "C": 1, "N": 2, "Q": 1, "G": 0}
     filled = {(r, c) for r in range(H) for c in range(W) if g[r][c] != "."}
     out = []
     for r in range(H):
@@ -242,7 +281,7 @@ def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="fr
 
 
 def acc_colour(acc):
-    return {"cap": "blue", "cowboy": "tan", "hardhat": "yellow", "headset": "black"}.get(acc, "grey")
+    return {"cap": "blue", "cowboy": "tan", "hardhat": "yellow", "headset": "black", "headband": "black"}.get(acc, "grey")
 
 
 def runs(cells):

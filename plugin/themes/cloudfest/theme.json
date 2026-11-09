@@ -37,6 +37,25 @@
       "sprite": {"hair": "brown", "top": "grey", "legs": "navy", "style": "short", "acc": ["cap", "glasses", "wave"], "eyes": "brown", "shirt": "black"}
     }
   },
+  "robes": {
+    "yusuf": {"hair": "black", "top": "robe", "legs": "robe", "style": "short", "acc": ["cap"], "eyes": "brown", "shirt": "black", "beard": true, "lanyard": "coral"},
+    "stefan": {"hair": "brown", "top": "robe", "legs": "robe", "style": "short", "acc": ["glasses", "goggles"], "eyes": "brown", "shirt": "black", "lanyard": "black"}
+  },
+  "suite_friends": [
+    {"hair": "tan", "top": "robe", "legs": "robe", "style": "curly", "eyes": "blue", "shirt": "green", "lanyard": "black"},
+    {"hair": "black", "top": "robe", "legs": "robe", "style": "short", "eyes": "brown", "shirt": "black", "beard": true, "lanyard": "black"},
+    {"hair": "skin", "top": "robe", "legs": "robe", "style": "short", "acc": ["glasses"], "eyes": "brown", "shirt": "navy", "lanyard": "black"}
+  ],
+  "crowd": [
+    {"hair": "black", "top": "grey", "legs": "navy", "style": "curly", "acc": ["headshades"], "eyes": "brown", "beard": true, "lanyard": "blue"},
+    {"hair": "black", "top": "silver", "legs": "black", "style": "long", "acc": ["shades"], "lanyard": "blue"},
+    {"hair": "brown", "top": "black", "legs": "black", "style": "curly", "acc": ["glasses"], "eyes": "brown", "lanyard": "blue"},
+    {"hair": "brown", "top": "silver", "legs": "black", "style": "long", "acc": ["shades"], "shirt": "coral", "lanyard": "blue"},
+    {"hair": "black", "top": "navy", "legs": "grey", "style": "short", "eyes": "brown", "beard": true, "lanyard": "blue"},
+    {"hair": "brown", "top": "navy", "legs": "tan", "style": "short", "acc": ["headband", "shades"], "lanyard": "blue"},
+    {"hair": "tan", "top": "coral", "legs": "tan", "style": "short", "eyes": "blue", "beard": true, "lanyard": "blue"},
+    {"hair": "black", "top": "navy", "legs": "navy", "style": "spiky", "eyes": "brown", "shirt": "white", "beard": true, "lanyard": "blue"}
+  ],
   "lines": {
     "invite": "A beer is waiting for your review!",
     "stage_welcome": "Welcome to the main stage!",

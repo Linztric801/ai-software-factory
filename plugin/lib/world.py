@@ -59,6 +59,8 @@ SPOTS = {  # where characters stand in each zone (x, y of the 14x18 sprite)
     "suite": [(170, 121), (186, 121), (202, 121), (218, 121), (170, 141), (186, 141), (202, 141), (218, 141)],
 }
 WORKING = {"Working", "Testing", "Analysing", "Deciding"}
+ROBE = {"top": "robe", "legs": "robe", "lanyard": "black"}  # idle agents relax in hotel robes, badges on
+CROWD_SPOTS = [(10, 82), (24, 84), (38, 82), (52, 84), (180, 82), (194, 84), (208, 82), (222, 84)]  # the grass by the paths
 STEPS = {  # the pipeline step each place stands for, shown on the map beside its sign
     "masterclass": "INTAKE",
     "pavilions": "SPEC",
@@ -91,10 +93,11 @@ def load_theme(name="cloudfest"):
         raise ValueError(f"theme {name!r}: the logo must be inside the theme folder")
     theme["logo"] = logo_file.name
     theme["dir"] = folder
-    for person in theme.get("people", {}).values():
-        acc = person["sprite"].get("acc")
-        if isinstance(acc, list):
-            person["sprite"]["acc"] = tuple(acc)
+    sprites = ([p["sprite"] for p in theme.get("people", {}).values()] + list(theme.get("robes", {}).values())
+               + theme.get("suite_friends", []) + theme.get("crowd", []))
+    for sprite in sprites:
+        if isinstance(sprite.get("acc"), list):
+            sprite["acc"] = tuple(sprite["acc"])
     return theme
 
 
@@ -309,7 +312,8 @@ def world_map(world, theme, project="project"):
         used[a["zone"]] += 1
         anim = "idle" if a["state"] == "Idle" else ("work" if a["state"] in WORKING else None)
         job = a["jobs"][0] if a["jobs"] else None
-        s.append(sprite_at(sx, sy, chibi(**kw), f"{name}: {a['state']}, {a['why']}", anim, id_=mid,
+        look = {**kw, **ROBE} if a["state"] == "Idle" else kw
+        s.append(sprite_at(sx, sy, chibi(**look), f"{name}: {a['state']}, {a['why']}", anim, id_=mid,
                            job=job["id"] if job else None))
         s.append(status_marker(sx, sy, "Working" if a["state"] in WORKING else a["state"]))
         if job:
@@ -330,6 +334,20 @@ def world_map(world, theme, project="project"):
             bubbles.append(bubble(sx + 7, sy - 7, a["say"][:24], "task", shift=-6 if a["zone"] == "plaza" else 0))
         elif used["suite"] == 1 and sum(1 for x in world["agents"].values() if x["state"] == "Idle") <= 2:
             bubbles.append(bubble(sx + 7, sy - 2, ambient(theme, 0), "ambient"))
+    people = theme.get("people", {})
+    for key, sprite in theme.get("robes", {}).items():
+        if key not in people or used["suite"] >= len(SPOTS["suite"]):
+            continue
+        sx, sy = SPOTS["suite"][used["suite"]]
+        used["suite"] += 1
+        who = people[key]
+        s.append(sprite_at(sx, sy, chibi(**sprite), f"{who['name']}, {who['role']}, in a robe (cameo)", "idle", id_=f"map-robe-{key}"))
+        tips.append(tip(f"map-robe-{key}", sx + 7, sy - 7, [who["name"], "In a robe at the after party"]))
+        rules.append(tip_rule(f"map-robe-{key}"))
+    for i, ((cx, cy), sprite) in enumerate(zip(CROWD_SPOTS, theme.get("crowd", []))):
+        s.append(sprite_at(cx, cy, chibi(**sprite), "A festival friend (cameo)", "idle", id_=f"map-crowd-{i}"))
+        tips.append(tip(f"map-crowd-{i}", cx + 7, cy - 1, ["Festival friend", "At the festival"]))
+        rules.append(tip_rule(f"map-crowd-{i}"))
     host = theme.get("people", {}).get(theme.get("host", ""))
     if host:
         s.append(sprite_at(140, 128, chibi(**host["sprite"]), f"{host['name']}, {host['role']} (cameo)", id_="map-host"))
@@ -609,9 +627,17 @@ def suite_scene(world, theme):
     tips, rules = [], []
     for (x, y), k in zip(spots, idle):
         name, role, kw = AGENT[k]
-        s.append(sprite_at(x, y, chibi(**{**kw, "top": "robe", "legs": "robe"}), f"{name}, idle", "idle", id_=f"suite-{k}"))
+        s.append(sprite_at(x, y, chibi(**{**kw, **ROBE}), f"{name}, idle", "idle", id_=f"suite-{k}"))
         tips.append(tip(f"suite-{k}", x + 7, y, [name, "Idle, relaxing"], width=W))
         rules.append(tip_rule(f"suite-{k}"))
+    # The robe crew: the two hosts and three festival friends, badges on, always at the party.
+    people = theme.get("people", {})
+    crew = [(people[k]["name"], "In a robe", sp) for k, sp in theme.get("robes", {}).items() if k in people]
+    crew += [("Festival friend", "In a robe", sp) for sp in theme.get("suite_friends", [])]
+    for i, ((x, y), (who, line, sprite)) in enumerate(zip([(12, 104), (26, 106), (40, 104), (186, 74), (140, 98)], crew)):
+        s.append(sprite_at(x, y, chibi(**sprite), f"{who}, in a robe (cameo)", "idle", id_=f"suite-crew-{i}"))
+        tips.append(tip(f"suite-crew-{i}", x + 7, y, [who, line], width=W))
+        rules.append(tip_rule(f"suite-crew-{i}"))
     if idle:
         s.append(bubble(123, 29, wrap(ambient(theme, 1), 16), "ambient"))
     s.extend(tips)
