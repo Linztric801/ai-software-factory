@@ -66,240 +66,167 @@ def cls(name, tone=1):
 
 # ---- Drawing primitives (SVG user units = pixels) --------------------------
 
-def rect(x, y, w, h, c):
-    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" class="{c}"/>'
+def rect(x, y, w, h, c, r=0):
+    rx = f' rx="{r}"' if r else ""
+    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}"{rx} class="{c}"/>'
 
 
 def box(x, y, w, h, name, outline=True):
-    """A shaded block: outline, light top-left edge, dark bottom-right edge."""
+    """A flat rounded block with a soft drop shadow and a lighter top band."""
+    r = round(min(1.6, w / 4, h / 4), 2)
     s = []
     if outline:
-        s.append(rect(x - 1, y - 1, w + 2, h + 2, cls("o")))
-    s.append(rect(x, y, w, h, cls(name)))
-    s.append(rect(x, y, w, 1, cls(name, 0)))
-    s.append(rect(x, y, 1, h, cls(name, 0)))
-    s.append(rect(x, y + h - 1, w, 1, cls(name, 2)))
-    s.append(rect(x + w - 1, y, 1, h, cls(name, 2)))
+        s.append(f'<rect x="{x}" y="{y + 0.7}" width="{w}" height="{h}" rx="{r}" class="{cls("o")}" opacity=".22"/>')
+    s.append(rect(x, y, w, h, cls(name), r))
+    if h >= 4:
+        s.append(f'<rect x="{x}" y="{y}" width="{w}" height="{round(min(2, h * .3), 2)}" rx="{r}" class="{cls(name, 0)}" opacity=".55"/>')
     return "".join(s)
 
 
 def cloud(x, y):
     """A white cloud-shaped lamp, as hung over the Cloud Fair."""
-    return (rect(x + 2, y - 1, 6, 1, cls("o")) + rect(x, y, 12, 4, cls("o")) + rect(x + 1, y - 2, 4, 2, cls("o"))
-            + rect(x + 1, y + 1, 10, 2, cls("white")) + rect(x + 3, y, 4, 1, cls("white", 0))
-            + rect(x + 2, y - 1, 2, 1, cls("white", 0)) + rect(x + 1, y + 3, 10, 1, cls("white", 2)))
+    return (f'<g class="{cls("white")}"><circle cx="{x + 3.5}" cy="{y + 1.6}" r="2.2"/><circle cx="{x + 6.5}" cy="{y + .8}" r="2.8"/>'
+            f'<circle cx="{x + 9.3}" cy="{y + 1.9}" r="2"/><rect x="{x + 1.3}" y="{y + 1.6}" width="10" height="2.4" rx="1.2"/></g>')
 
 
 def text(x, y, s, size=5, c="sign", anchor="start"):
     if any(ch.isdigit() for ch in s):
         c += " digits"
-    size = round(size * (1 if "digits" in c else 1.25), 2)  # Jersey 10 runs small per point
+    size = round(size * 0.92, 2)
     return (f'<text x="{x}" y="{y}" class="{c}" font-size="{size}" '
             f'text-anchor="{anchor}">{escape(s)}</text>')
 
 
-# ---- Chibi characters: a 12x16 template, outlined and shaded in code ---------
+# ---- Figures: flat vector people in a 14x18 box, shaded with tones, no outlines -----
 
 
-BASE = [  # anime chibi, 12x16: big head, big eyes with a highlight, blush, small body
-    "...HHHHHH...",
-    ".HHHHHHHHHH.",
-    "HHHHHHHHHHHH",
-    "HHHHHHHHHHHH",
-    "HHSSHSSHSSHH",
-    "HSSSSSSSSSSH",
-    "HSWISSSSWISH",
-    "HSIISSSSIISH",
-    "HSBSSSSSSBSH",
-    ".SSSSSMMSSS.",
-    "..SSSSSSSS..",
-    "..TTTTTTTT..",
-    ".STTTTTTTTS.",
-    "..TTTTTTTT..",
-    "...LL..LL...",
-    "...OO..OO...",
-]
+def fill(name, tone=1):
+    return f'class="{cls(name, tone)}"'
 
 
-def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="front", eyes="navy", shirt=False, beard=False,
-          lanyard=None):
-    accs = acc if isinstance(acc, tuple) else (acc,)
-    g = [list("." + row + ".") for row in BASE]
-    g.insert(0, list("." * 14))
-    g.append(list("." * 14))
-    W, H = 14, 18
-
-    def put(r, c, v):
-        if 0 <= r < H and 0 <= c < W:
-            g[r][c] = v
-
-    if style == "spiky":
-        for c in (2, 5, 8, 11):
-            put(0, c, "H")
-            put(1, c - 1, "H")
-    if style == "bob":
-        for r in range(9, 12):
-            put(r, 1, "H")
-            put(r, 12, "H")
-    if style == "long":
-        for r in range(9, 15):
-            put(r, 1, "H")
-            put(r, 12, "H")
-    if style == "curly":   # a bumpy top and fuller sides
-        for c in (2, 3, 10, 11):
-            put(1, c, "H")
-        for c in (4, 6, 8):
-            put(0, c, "H")
-        for r in range(5, 9):
-            put(r, 1, "H")
-            put(r, 12, "H")
-    if style == "twin":
-        for r in range(4, 13):
-            put(r, 0, "H")
-            put(r, 13, "H")
-    if "cap" in accs:       # blue cap, brim to the left
-        for c in range(2, 13):
-            put(1, c, "A")
-            put(2, c, "A")
-        for c in range(0, 5):
-            put(3, c, "A")
-    if "cowboy" in accs:    # tan hat with a wide brim
-        for c in range(3, 11):
-            put(0, c, "A")
-            put(1, c, "A")
-        for c in range(0, 14):
-            put(2, c, "A")
-    if "hardhat" in accs:
-        for c in range(3, 11):
-            put(1, c, "A")
-        for c in range(1, 13):
-            put(2, c, "A")
-    if "headband" in accs:  # a dark band across the forehead
-        for c in range(1, 13):
-            put(4, c, "A")
-    if "headshades" in accs:  # sunglasses pushed up on the head
-        for c in (3, 4, 5, 8, 9, 10):
-            put(2, c, "E")
-        put(2, 6, "E")
-        put(2, 7, "E")
-    if "goggles" in accs:   # coloured glasses pushed up on the head
-        for c in (3, 4, 5, 8, 9, 10):
-            put(2, c, "C")
-        put(2, 6, "E")
-        put(2, 7, "E")
-    if "shades" in accs:    # sunglasses over both eyes
-        for r in (7, 8):
-            for c in (2, 3, 4, 9, 10, 11):
-                put(r, c, "E")
-        put(7, 5, "E")
-        put(7, 8, "E")
-        put(7, 6, "E")
-        put(7, 7, "E")
-    if "glasses" in accs:   # frames beside both eyes and a bridge
-        for r in (7, 8):
-            for c in (2, 5, 8, 11):
-                put(r, c, "E")
-        put(7, 6, "E")
-        put(7, 7, "E")
-    if "headset" in accs:
-        for r in range(3, 10):
-            put(r, 0, "A")
-            put(r, 13, "A")
-        put(10, 2, "A")
-    if "wave" in accs:     # left hand up, waving
-        for r in range(6, 13):
-            put(r, 0, "S")
-        put(5, 0, "S")
-    if "peace" in accs:     # right hand up with two fingers
-        for r in range(9, 14):
-            put(r, 13, "S")
-    if shirt and pose != "back":   # white shirt showing between the lapels
-        for r in range(12, 15):
-            put(r, 6, "K")
-            put(r, 7, "K")
-    if lanyard and pose != "back":  # a lanyard from the neck and the red-topped festival badge
-        for r in (12, 13):
-            put(r, 5, "N")
-            put(r, 8, "N")
-        put(14, 6, "Q")
-        put(14, 7, "Q")
-        put(15, 6, "G")
-        put(15, 7, "G")
-    if beard and pose != "back":   # short beard along the jaw and chin
-        for c in range(3, 11):
-            if g[10][c] == "S":
-                g[10][c] = "D"
-        for c in (2, 11):
-            if g[9][c] == "S":
-                g[9][c] = "D"
-        for c in range(4, 10):
-            if g[11][c] == "S":
-                g[11][c] = "D"
-    if pose == "back":
-        for r in range(5, 11):
-            for c in range(W):
-                if g[r][c] in "SWIBM":
-                    g[r][c] = "H"
-    if pose == "side":     # facing left: one eye, a nose, hair over the far half
-        for r in range(5, 11):
-            for c in range(8, 13):
-                if g[r][c] in "SWIBM":
-                    g[r][c] = "H"
-        put(8, 1, "S")
-
-    palette = {"H": hair, "S": skin, "T": top, "L": legs, "A": acc_colour(next((a for a in accs if a not in ("glasses", "peace", "wave", "shades", "headshades", "goggles")), None)), "E": "o", "O": "o",
-               "W": "white", "I": eyes, "B": "pink", "M": "coral", "K": shirt if isinstance(shirt, str) else "white", "D": hair,
-               "C": "cyan", "N": lanyard or "black", "Q": "pinkb", "G": "white"}
-    fixed = {"W": 0, "I": 2, "B": 0, "M": 2, "K": 1, "D": 2, "C": 1, "N": 2, "Q": 1, "G": 0}
-    filled = {(r, c) for r in range(H) for c in range(W) if g[r][c] != "."}
-    out = []
-    for r in range(H):
-        for c in range(W):
-            if (r, c) in filled:
-                continue
-            if any((r + dr, c + dc) in filled for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1))):
-                out.append((r, c, cls("o")))
-    for r, c in filled:
-        k = g[r][c]
-        name = palette[k]
-        if k in "EO":
-            out.append((r, c, cls("o")))
-            continue
-        if k in fixed:
-            out.append((r, c, cls(name, fixed[k])))
-            continue
-        same = lambda rr, cc: 0 <= rr < H and 0 <= cc < W and g[rr][cc] == k
-        tone = 1
-        if not same(r, c + 1) or not same(r + 1, c):
-            tone = 2
-        elif not same(r - 1, c) or not same(r, c - 1):
-            tone = 0
-        if k == "S" and tone == 0:
-            tone = 1
-        out.append((r, c, cls(name, tone)))
-    return runs(out)
+def stroke(name, width, tone=1):
+    var = f"--px-{name}{'' if tone == 1 else '-' + TONES[tone]}"
+    return f'fill="none" style="stroke:var({var})" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"'
 
 
 def acc_colour(acc):
     return {"cap": "blue", "cowboy": "tan", "hardhat": "yellow", "headset": "black", "headband": "black"}.get(acc, "grey")
 
 
-def runs(cells):
-    """Merge horizontal runs of one class into single rects."""
-    by_row = {}
-    for r, c, k in cells:
-        by_row.setdefault(r, []).append((c, k))
-    s = []
-    for r, row in sorted(by_row.items()):
-        row.sort()
-        start, prev, kind = row[0][0], row[0][0], row[0][1]
-        for c, k in row[1:] + [(None, None)]:
-            if c is not None and c == prev + 1 and k == kind:
-                prev = c
-                continue
-            s.append(rect(start, r, prev - start + 1, 1, kind))
-            if c is not None:
-                start, prev, kind = c, c, k
+HAIR_TOP = "M3.65 5.9C3.1 1.2 10.9 1.2 10.35 5.9C10.1 4.6 9.6 3.8 9.1 3.55C8.2 4.05 6.2 4.1 5.1 3.45C4.5 3.8 3.95 4.6 3.65 5.9Z"
+
+
+def chibi(hair, top, legs="navy", skin="skin", style="short", acc=None, pose="front", eyes="navy", shirt=False, beard=False,
+          lanyard=None):
+    """One person, drawn as smooth flat shapes: same name and box as the old pixel sprite,
+    so every scene and the avatars use it unchanged."""
+    accs = set(acc if isinstance(acc, tuple) else (acc,))
+    bald = hair == "skin"
+    robe = top == "robe"
+    back = pose == "back"
+    s = ['<g class="fig">', f'<ellipse cx="7" cy="17.55" rx="3.9" ry="0.55" {fill("o")} opacity=".22"/>']
+
+    # Hair that falls behind the head and shoulders
+    if not bald and style in ("long", "bob", "twin"):
+        low = {"long": 11.4, "bob": 8.2, "twin": 9.6}[style]
+        s.append(f'<path d="M3.5 4.6C3.5 1.6 10.5 1.6 10.5 4.6V{low}Q10.5 {low + .5} 10 {low + .5}H4Q3.5 {low + .5} 3.5 {low}Z" {fill(hair, 2)}/>')
+        if style == "twin":
+            s.append(f'<ellipse cx="2.6" cy="7.8" rx="1.1" ry="2.2" {fill(hair, 2)}/><ellipse cx="11.4" cy="7.8" rx="1.1" ry="2.2" {fill(hair, 2)}/>')
+
+    # Legs and shoes
+    s.append(f'<rect x="4.9" y="12.4" width="1.9" height="4.9" rx=".8" {fill(legs, 2 if robe else 1)}/>')
+    s.append(f'<rect x="7.2" y="12.4" width="1.9" height="4.9" rx=".8" {fill(legs)}/>')
+    if robe:  # bare shins under the robe
+        s.append(f'<rect x="5.15" y="15" width="1.45" height="1.9" rx=".6" {fill(skin)}/><rect x="7.4" y="15" width="1.45" height="1.9" rx=".6" {fill(skin)}/>')
+    s.append(f'<ellipse cx="5.7" cy="17.25" rx="1.2" ry=".5" {fill("black", 2)}/><ellipse cx="8.3" cy="17.25" rx="1.2" ry=".5" {fill("black", 2)}/>')
+
+    # Arms (a raised one for a wave or a peace sign), then the torso over them
+    left_up, right_up = "wave" in accs, "peace" in accs
+    sleeve = top
+    if left_up:
+        s.append(f'<path d="M3.6 9.4L1.9 5.6" {stroke(sleeve, 1.45)}/><circle cx="1.75" cy="5.1" r=".72" {fill(skin)}/>')
+    else:
+        s.append(f'<path d="M3.7 9.3L3.1 12.6" {stroke(sleeve, 1.5)}/><circle cx="3.05" cy="13.15" r=".68" {fill(skin)}/>')
+    if right_up:
+        s.append(f'<path d="M10.4 9.4L12.1 5.9" {stroke(sleeve, 1.45)}/><circle cx="12.25" cy="5.4" r=".72" {fill(skin)}/>'
+                 f'<path d="M12 4.8L11.85 3.9M12.55 4.8L12.75 3.95" {stroke(skin, .35)}/>')
+    else:
+        s.append(f'<path d="M10.3 9.3L10.9 12.6" {stroke(sleeve, 1.5)}/><circle cx="10.95" cy="13.15" r=".68" {fill(skin)}/>')
+    hem = 15.2 if robe else 13.1
+    s.append(f'<path d="M4.6 8.55Q7 7.95 9.4 8.55Q10.6 8.9 10.5 10.2L10.1 {hem}H3.9L3.5 10.2Q3.4 8.9 4.6 8.55Z" {fill(top)}/>')
+    s.append(f'<path d="M7 8.3V{hem}" {stroke(top, .25, 2)} opacity=".5"/>' if not robe else "")
+    if robe:  # waffle robe: lapels over a tee, a tied belt, texture dots
+        under = shirt if isinstance(shirt, str) else "black"
+        s.append(f'<path d="M5.7 8.35L7 11L8.3 8.35Z" {fill(under)}/>')
+        s.append(f'<path d="M5.5 8.4L7 11.3L6.4 12.2L4.7 8.8Z" {fill(top, 0)}/><path d="M8.5 8.4L7 11.3L7.6 12.2L9.3 8.8Z" {fill(top, 0)}/>')
+        s.append(f'<rect x="3.75" y="12.1" width="6.5" height=".55" rx=".25" {fill(top, 2)}/>')
+        dots = "".join(f'<circle cx="{x}" cy="{y}" r=".12"/>' for y in (13.2, 14.2) for x in (4.6, 5.8, 8.2, 9.4))
+        s.append(f'<g {fill(top, 2)} opacity=".55">{dots}</g>')
+    elif shirt and not back:  # a shirt or tee showing in the opening
+        colour = shirt if isinstance(shirt, str) else "white"
+        s.append(f'<path d="M6 8.35L7 10.3L8 8.35Z" {fill(colour)}/>')
+    if lanyard and not back:  # lanyard and the red-topped festival badge
+        s.append(f'<path d="M5.95 8.5L6.55 11.2M8.05 8.5L7.45 11.2" {stroke(lanyard, .32)}/>')
+        s.append(f'<rect x="5.95" y="11" width="2.1" height="2.25" rx=".3" {fill("white")}/>'
+                 f'<rect x="5.95" y="11" width="2.1" height=".7" rx=".3" {fill("pinkb")}/>'
+                 f'<rect x="6.35" y="12.1" width="1.3" height=".22" {fill("grey")}/>')
+
+    # Neck and head
+    s.append(f'<rect x="6.25" y="7.2" width="1.5" height="1.5" rx=".5" {fill(skin, 2)}/>')
+    s.append(f'<ellipse cx="3.85" cy="5.3" rx=".55" ry=".75" {fill(skin, 2)}/><ellipse cx="10.15" cy="5.3" rx=".55" ry=".75" {fill(skin, 2)}/>')
+    s.append(f'<ellipse cx="7" cy="4.9" rx="3.15" ry="3.25" {fill(skin)}/>')
+    if back:
+        s.append(f'<ellipse cx="7" cy="4.7" rx="3.25" ry="3.25" {fill(hair if not bald else skin)}/>')
+    else:
+        if beard:
+            s.append(f'<path d="M3.9 5.1C3.9 8.9 10.1 8.9 10.1 5.1C9.6 6.7 8.4 7.2 7 7.2C5.6 7.2 4.4 6.7 3.9 5.1Z" {fill(hair, 2)}/>')
+        side = -0.7 if pose == "side" else 0
+        for ex in ((5.75 + side,) if pose == "side" else (5.75, 8.25)):
+            s.append(f'<ellipse cx="{ex}" cy="5.25" rx=".42" ry=".52" {fill(eyes, 2)}/><circle cx="{ex + .14}" cy="5.07" r=".14" {fill("white", 0)}/>')
+        brow = hair if not bald else "brown"
+        s.append(f'<path d="M5.15 4.25Q5.75 3.95 6.35 4.2M7.65 4.2Q8.25 3.95 8.85 4.25" {stroke(brow, .28, 2)}/>')
+        s.append(f'<ellipse cx="4.85" cy="6.2" rx=".55" ry=".3" {fill("pink")} opacity=".45"/><ellipse cx="9.15" cy="6.2" rx=".55" ry=".3" {fill("pink")} opacity=".45"/>')
+        s.append(f'<path d="M6.25 6.55Q7 7.15 7.75 6.55" {stroke("coral", .3, 2)}/>')
+
+    # Hair on top
+    if not bald and not back:
+        if style == "spiky":
+            s.append(f'<path d="M3.7 5.2C3.3 2.4 4.2 1.9 4.6 1.2L5.4 2.1L6.2 0.9L7.1 2L8 0.9L8.8 2.1L9.6 1.2C10 1.9 10.7 2.4 10.3 5.2C9.6 3.6 8.4 3.2 7 3.2C5.6 3.2 4.4 3.6 3.7 5.2Z" {fill(hair)}/>')
+        elif style == "curly":
+            bumps = "".join(f'<circle cx="{x}" cy="{y}" r="1.05"/>' for x, y in ((4.3, 3.6), (5.4, 2.3), (7, 1.85), (8.6, 2.3), (9.7, 3.6), (3.9, 5), (10.1, 5)))
+            s.append(f'<g {fill(hair)}>{bumps}</g>')
+        else:
+            s.append(f'<path d="{HAIR_TOP}" {fill(hair)}/>')
+        s.append(f'<path d="M5.2 2.4Q7 1.7 8.8 2.4" {stroke(hair, .35, 0)} opacity=".6"/>')
+    elif bald and not back:
+        s.append(f'<ellipse cx="6" cy="2.6" rx="1.2" ry=".5" {fill(skin, 0)} opacity=".8"/>')
+
+    # Headwear and eyewear
+    a = acc_colour(next((x for x in accs if x in ("cap", "cowboy", "hardhat", "headset", "headband")), None))
+    if "headband" in accs:
+        s.append(f'<rect x="3.75" y="3.35" width="6.5" height=".85" rx=".4" {fill(a, 2)}/>')
+    if "headshades" in accs or "goggles" in accs:
+        c = "cyan" if "goggles" in accs else "black"
+        s.append(f'<rect x="4.4" y="2.05" width="2.2" height="1.1" rx=".5" {fill(c, 2)}/><rect x="7.4" y="2.05" width="2.2" height="1.1" rx=".5" {fill(c, 2)}/>'
+                 f'<path d="M6.6 2.5H7.4" {stroke("black", .3, 2)}/>')
+    if "cap" in accs:
+        s.append(f'<path d="M3.6 4.1C3.6 0.9 10.4 0.9 10.4 4.1Z" {fill(a)}/><path d="M3.4 4.15H1.2Q1.6 3.35 3.6 3.55Z" {fill(a, 2)}/>'
+                 f'<rect x="3.5" y="3.75" width="7" height=".55" rx=".25" {fill(a, 2)}/><circle cx="7" cy="1.25" r=".35" {fill(a, 2)}/>')
+    if "hardhat" in accs:
+        s.append(f'<path d="M3.8 3.9C3.8 0.8 10.2 0.8 10.2 3.9Z" {fill(a)}/><rect x="2.9" y="3.6" width="8.2" height=".7" rx=".35" {fill(a, 2)}/>'
+                 f'<rect x="6.6" y="1.1" width=".8" height="2.6" rx=".3" {fill(a, 0)}/>')
+    if "cowboy" in accs:
+        s.append(f'<ellipse cx="7" cy="3.6" rx="5.2" ry=".85" {fill(a, 2)}/><path d="M4.6 3.6C4.6 .6 9.4 .6 9.4 3.6Z" {fill(a)}/>')
+    if "headset" in accs:
+        s.append(f'<path d="M3.7 5C3.7 .9 10.3 .9 10.3 5" {stroke(a, .45)}/><rect x="3.15" y="4.4" width="1.1" height="1.9" rx=".5" {fill(a, 2)}/>'
+                 f'<rect x="9.75" y="4.4" width="1.1" height="1.9" rx=".5" {fill(a, 2)}/><path d="M4 6.2Q4.6 7.5 6.1 7.2" {stroke(a, .3)}/>')
+    if not back and "shades" in accs:
+        s.append(f'<rect x="4.65" y="4.75" width="2.1" height="1.15" rx=".45" {fill("black", 2)}/><rect x="7.25" y="4.75" width="2.1" height="1.15" rx=".45" {fill("black", 2)}/>'
+                 f'<path d="M6.75 5.1H7.25" {stroke("black", .3, 2)}/>')
+    elif not back and "glasses" in accs:
+        s.append(f'<rect x="4.75" y="4.55" width="2" height="1.45" rx=".45" {stroke("black", .32, 2)}/>'
+                 f'<rect x="7.25" y="4.55" width="2" height="1.45" rx=".45" {stroke("black", .32, 2)}/><path d="M6.75 5.05H7.25" {stroke("black", .3, 2)}/>')
+    s.append("</g>")
     return "".join(s)
 
 
@@ -320,16 +247,14 @@ def sprite_at(x, y, svg, label, anim=None, id_=None, job=None):
 def step_plate(x, y, label, size=3.2):
     """The pipeline step a place stands for, on a small plate beside its sign."""
     w = round(len(label) * size * 0.62 + 5)
-    return (rect(x - 1, y - 1, w + 2, 7, cls("o")) + rect(x, y, w, 5, cls("black", 2))
-            + text(x + 2.5, y + 4, label, size, "sign-cyan"))
+    return rect(x, y, w, 5, cls("black", 2), 2.5) + text(x + 2.5, y + 3.7, label, size, "sign-cyan")
 
 
 def nametag(cx, y, label, size=3.3):
     """A small, always-visible name plate under a character's feet."""
     w = round(len(label) * size * 0.62 + 4)
     x = round(cx - w / 2)
-    return (rect(x - 1, y - 1, w + 2, 7, cls("o")) + rect(x, y, w, 5, cls("black", 2))
-            + text(cx, y + 4, label, size, "sign", "middle"))
+    return rect(x, y, w, 5, cls("black", 2), 2.5) + text(cx, y + 3.7, label, size, "sign", "middle")
 
 
 def tip_rule(id_, list_key=None):
@@ -348,8 +273,9 @@ def tip(id_, cx, top, lines, width=240):
     h = round(len(lines) * (size + 1.6) + 4)
     x = max(1, min(round(cx - w / 2), width - w - 1))
     y = max(1, top - h - 3)
-    out = [f'<g class="tip" id="tip-{id_}" aria-hidden="true">', rect(x - 1, y - 1, w + 2, h + 2, cls("o")),
-           rect(x, y, w, h, cls("black", 2)), rect(x, y, w, 1, cls("cyan"))]
+    out = [f'<g class="tip" id="tip-{id_}" aria-hidden="true">',
+           f'<rect x="{x}" y="{y + .8}" width="{w}" height="{h}" rx="2" class="{cls("o")}" opacity=".3"/>',
+           rect(x, y, w, h, cls("black", 2), 2), rect(x + 2, y, w - 4, .6, cls("cyan"), .3)]
     for i, line in enumerate(lines):
         out.append(text(x + 4, y + 2 + (i + 1) * (size + 1.6) - 1.4, line, size, "sign" if i else "sign-cyan"))
     out.append("</g>")
@@ -359,11 +285,11 @@ def tip(id_, cx, top, lines, width=240):
 def status_marker(x, y, state):
     """A small pixel badge above a head; the text list carries the same state."""
     if state == "Working" or state == "Testing" or state == "Analysing":
-        return box(x + 5, y - 6, 4, 4, "cyan")
-    if state.startswith("Waiting"):
-        return box(x + 4, y - 7, 6, 5, "coral") + rect(x + 6, y - 6, 2, 1, cls("white")) + rect(x + 7, y - 5, 1, 1, cls("white")) + rect(x + 7, y - 3, 1, 1, cls("white"))
-    if state == "Blocked":
-        return box(x + 5, y - 7, 4, 5, "coral") + rect(x + 6, y - 6, 2, 2, cls("white")) + rect(x + 6, y - 3, 2, 1, cls("white"))
+        return f'<circle cx="{x + 7}" cy="{y - 4}" r="1.6" class="{cls("cyan")}"/><circle cx="{x + 7}" cy="{y - 4}" r=".7" class="{cls("white", 0)}"/>'
+    if state.startswith("Waiting") or state == "Blocked":
+        mark = "?" if state.startswith("Waiting") else "!"
+        return (f'<circle cx="{x + 7}" cy="{y - 4.5}" r="2.3" class="{cls("coral")}"/>'
+                + text(x + 7, y - 3.2, mark, 3.6, "sign", "middle"))
     return ""
 
 
@@ -378,11 +304,9 @@ def bubble(tip_x, tip_y, lines, kind="task", shift=0, size=3.6):
     fill = "white" if kind == "task" else "cyan"
     tone = 1 if kind == "task" else 0
     s = [f'<g class="bubble-g bubble-{kind}">',
-         rect(x - 1, y - 1, w + 2, h + 2, cls("o")),
-         rect(x, y, w, h, cls(fill, tone)),
-         rect(tip_x - 2, y + h, 5, 1, cls("o")), rect(tip_x - 1, y + h, 3, 1, cls(fill, tone)),
-         rect(tip_x - 1, y + h + 1, 3, 1, cls("o")), rect(tip_x, y + h + 1, 1, 1, cls(fill, tone)),
-         rect(tip_x, y + h + 2, 1, 1, cls("o"))]
+         f'<rect x="{x}" y="{y + .7}" width="{w}" height="{h}" rx="2" class="{cls("o")}" opacity=".25"/>',
+         rect(x, y, w, h, cls(fill, tone), 2),
+         f'<path d="M{tip_x - 1.6} {y + h - .2}L{tip_x + .5} {y + h + 2.4}L{tip_x + 1.6} {y + h - .2}Z" class="{cls(fill, tone)}"/>']
     for i, line in enumerate(lines):
         s.append(text(x + 3, y + 2 + (i + 1) * (size + 1.4) - 1.2, line, size, "sign-dark"))
     s.append("</g>")
