@@ -10,11 +10,16 @@ With the sandbox on, every Bash command Claude runs in this project, the
 factory's agents' included, may write only to the project, the factory's
 state folder and build caches; can't read SSH keys or cloud credentials; and
 reaches only GitHub, the npm registry, Anthropic and the domains the project
-lists under `sandbox.allowed_domains` in .factory/config.json. GitHub access
-itself stays available, because the builder pushes and opens PRs.
+lists under `sandbox.allowed_domains` in .factory/config.json as merged on the
+base branch. GitHub access itself stays available, because the builder pushes
+and opens PRs.
+
+Only the factory's own hosts go into the user settings' strict allowlist; a
+project's extra domains stay in that project's settings.
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -25,21 +30,38 @@ from party import Project, home  # noqa: E402
 DOMAINS = ["github.com", "api.github.com", "codeload.github.com", "*.githubusercontent.com",
            "registry.npmjs.org", "*.npmjs.org", "api.anthropic.com"]
 WRITABLE = ["~/Library/pnpm", "~/.local/share/pnpm", "~/.cache", "~/Library/Caches",
-            "~/Library/Developer", "/tmp", "/private/tmp"]
+            "~/Library/Developer", "~/Library/Logs/CoreSimulator", "~/Library/org.swift.swiftpm",
+            "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]  # Xcode's temp and caches
 SECRETS = ["~/.ssh", "~/.aws", "~/.config/gcloud", "~/.azure", "~/.kube", "~/.docker/config.json", "~/.netrc"]
 
 
+DOMAIN = re.compile(r"(\*\.)?([a-z0-9-]+\.)+[a-z]{2,}")
+
+
+def extra_domains(project):
+    """A project's extra hosts, from its reviewed config; no `*`, no bare TLD wildcards."""
+    extra = (project.committed_config().get("sandbox") or {}).get("allowed_domains") or []
+    bad = [d for d in extra if not (isinstance(d, str) and DOMAIN.fullmatch(d)
+                                    and d.removeprefix("*.").count(".") >= 1)]
+    if bad:
+        print(f"party-sandbox: not a domain the sandbox may allow: {', '.join(map(str, bad))}", file=sys.stderr)
+        sys.exit(1)
+    return [d for d in extra if d not in DOMAINS]
+
+
 def profile(project):
-    extra = (project.config.get("sandbox") or {}).get("allowed_domains", [])
+    extra = extra_domains(project)
     return {
         "enabled": True,
         "allowUnsandboxedCommands": False,  # no per-command way out of the sandbox
         "filesystem": {"allowWrite": [str(home()), *WRITABLE]},
         "credentials": {"files": [{"path": p, "mode": "deny"} for p in SECRETS]},
         "network": {
-            "allowedDomains": DOMAINS + [d for d in extra if d not in DOMAINS],
+            "allowedDomains": DOMAINS + extra,
             "allowLocalBinding": True,                       # dev servers for UI checks
-            "allowMachLookup": ["com.apple.coresimulator.*",  # the iOS simulator
+            "allowUnixSockets": ["/private/var/tmp", "/var/tmp"],  # the simulator's test runner
+            "allowMachLookup": ["com.apple.CoreSimulator.*", "com.apple.coresimulator.*",  # the iOS simulator
+                                "com.apple.dt.*",
                                 "com.apple.SecurityServer", "com.apple.securityd.xpc",  # gh's keychain login
                                 "com.apple.trustd", "com.apple.trustd.agent"],          # TLS checks for gh and git
         },
@@ -69,8 +91,10 @@ def main(argv):
     current = json.loads(settings_file.read_text()) if settings_file.exists() else {}
     if argv == ["--write"]:
         current["sandbox"] = profile(project)
-        strict_network(current["sandbox"]["network"]["allowedDomains"])
-        message = f"sandbox on for {project.slug}: {settings_file}"
+        strict_network(DOMAINS)
+        extra = extra_domains(project)
+        message = (f"sandbox on for {project.slug}: {settings_file}"
+                   + (f"; also allows {', '.join(extra)}" if extra else ""))
     elif argv == ["--off"]:
         current.pop("sandbox", None)
         message = f"sandbox off for {project.slug}"

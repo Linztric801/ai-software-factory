@@ -478,7 +478,7 @@ class HumanApproval(FactoryTest):
         self.park()
         commit = f.load(self.id)["reviewed_commit"]
         self.assertEqual(f.approve(self.id, "10")[0], 0)
-        record = f.root / "approvals" / "acme-widgets" / f"{self.id}-{commit}.json"
+        record = f.approvals / f"{self.id}-{commit}.json"
         self.assertEqual(json.loads(record.read_text())["approved_by"], "owner")
 
     def test_only_a_named_approver_may_approve(self):
@@ -533,12 +533,85 @@ class HumanApproval(FactoryTest):
         self.assertEqual(f.load(self.id)["stage"], "merged")
         self.assertNotIn("factory:needs-human", f.labels(1))
 
+    def forge(self, record):
+        """What a rogue process might do: write an approval record, move the job to merging."""
+        f = self.f
+        job = f.load(self.id)
+        job["stage"], job["approved_by"] = "merging", "owner"
+        (f.dir(self.id) / "job.json").write_text(json.dumps(job))
+        return {"job": self.id, "pr": job["pr"], "commit": job["reviewed_commit"], "approved_by": "owner", **record}
+
+    def test_an_approvals_folder_chosen_by_a_variable_is_ignored(self):
+        f = self.f
+        self.park()
+        record = self.forge({})
+        fake = f.root / "fake-approvals" / "acme-widgets"
+        fake.mkdir(parents=True)
+        (fake / f"{self.id}-{record['commit']}.json").write_text(json.dumps(record))
+        res = f.run("job", "merge", self.id, env={"PARTY_APPROVALS": str(f.root / "fake-approvals"),
+                                                 "HOME": str(f.root)})
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn("no approval by a person", res.stderr)
+        self.assertEqual(f.calls("pr", "merge"), [])
+
+    def test_a_record_for_another_pr_job_or_approver_merges_nothing(self):
+        f = self.f
+        self.park()
+        (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "human_required", "approvers": ["owner"]}))
+        f.approvals.mkdir(parents=True)
+        for wrong in ({"pr": 99}, {"approved_by": "mallory"}, {"job": "002-other"}):
+            record = self.forge(wrong)
+            (f.approvals / f"{self.id}-{record['commit']}.json").write_text(json.dumps(record))
+            self.refused("merge", self.id, says="no approval by a person")
+        self.assertEqual(f.calls("pr", "merge"), [])
+
+    def test_the_local_config_cant_switch_off_human_approval(self):
+        f = self.f
+        config = json.loads((f.repo / ".factory" / "config.json").read_text())
+        config["merge_policy"] = "human_required"
+        (f.repo / ".factory" / "config.json").write_text(json.dumps(config))
+        f.git(f.repo, "commit", "-qam", "people approve merges")
+        f.git(f.repo, "push", "-q", "origin", "main")
+        (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "auto_after_approval"}))
+        self.park()
+        self.assertEqual(f.calls("pr", "merge"), [])
+
     def test_an_unknown_policy_is_refused(self):
         f = self.f
         (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "yolo"}))
         res = f.job("merge", self.id)
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("merge_policy 'yolo'", res.stderr)
+
+
+class Sandbox(FactoryTest):
+    def domains(self):
+        res = self.f.run("sandbox")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return json.loads(res.stdout)["sandbox"]["network"]["allowedDomains"]
+
+    def commit_domains(self, domains):
+        f = self.f
+        config = json.loads((f.repo / ".factory" / "config.json").read_text())
+        config["sandbox"] = {"allowed_domains": domains}
+        (f.repo / ".factory" / "config.json").write_text(json.dumps(config))
+        f.git(f.repo, "commit", "-qam", "sandbox domains")
+        f.git(f.repo, "push", "-q", "origin", "main")
+
+    def test_extra_domains_come_from_the_committed_config_only(self):
+        f = self.f
+        f.state_dir.mkdir(parents=True, exist_ok=True)
+        (f.state_dir / "config.json").write_text(json.dumps({"sandbox": {"allowed_domains": ["evil.example"]}}))
+        self.assertNotIn("evil.example", self.domains())
+        self.commit_domains(["cdn.example.org"])
+        self.assertIn("cdn.example.org", self.domains())
+
+    def test_wildcards_that_open_everything_are_refused(self):
+        for bad in (["*"], ["*.com"], ["com"]):
+            self.commit_domains(bad)
+            res = self.f.run("sandbox")
+            self.assertEqual(res.returncode, 1, bad)
+            self.assertIn("not a domain the sandbox may allow", res.stderr)
 
 
 class Queue(FactoryTest):

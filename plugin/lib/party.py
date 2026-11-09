@@ -93,6 +93,19 @@ class Project:
         self.config = config
         self.checks = self.repo / config.get("checks", ".factory/checks.sh")
 
+    def committed_config(self):
+        """The plugin's defaults and the project's .factory/config.json as merged on the
+        base branch: settings an agent can't change without a reviewed PR. Without a
+        readable copy, the defaults alone (human approval)."""
+        base = self.config.get("base_branch", "main")
+        res = subprocess.run(["git", "-C", str(self.repo), "show", f"origin/{base}:.factory/config.json"],
+                             capture_output=True, text=True)
+        try:
+            committed = json.loads(res.stdout) if res.returncode == 0 else {}
+        except json.JSONDecodeError:
+            committed = {}
+        return merge(_read(DEFAULTS), committed if isinstance(committed, dict) else {})
+
 
 def project_of_job_folder(job_folder):
     """The project a job folder belongs to, from the repo its job.json records."""

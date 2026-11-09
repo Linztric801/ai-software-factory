@@ -29,6 +29,7 @@ Usage:
 import fcntl
 import json
 import os
+import pwd
 import re
 import subprocess
 import sys
@@ -649,10 +650,23 @@ def cmd_queue():
 
 
 def merge_policy():
-    policy = CONFIG.get("merge_policy", "human_required")
-    if policy not in MERGE_POLICIES:
-        die(f"merge_policy {policy!r} isn't one of {', '.join(sorted(MERGE_POLICIES))}")
-    return policy
+    """Merging without a person needs the committed config to say so; the machine-local
+    config.json (which the agents' sandbox can write) can only tighten it."""
+    policy = PROJECT.committed_config().get("merge_policy", "human_required")
+    local = CONFIG.get("merge_policy", policy)
+    for p in (policy, local):
+        if p not in MERGE_POLICIES:
+            die(f"merge_policy {p!r} isn't one of {', '.join(sorted(MERGE_POLICIES))}")
+    return "human_required" if "human_required" in (policy, local) else policy
+
+
+def approver_names():
+    """Approvers from the committed config; the local config may only narrow them."""
+    committed = PROJECT.committed_config().get("approvers") or []
+    local = CONFIG.get("approvers") or []
+    if committed and local:
+        return [n for n in committed if n in local]
+    return committed or local
 
 
 def confirm_in_terminal(job):
@@ -678,7 +692,7 @@ def confirm_in_terminal(job):
 
 def approver_allowed(login):
     """With approvers named in the settings, only their GitHub accounts may approve."""
-    names = CONFIG.get("approvers") or []
+    names = approver_names()
     if not names:
         return True
     allowed = {n.lower() for n in names}
@@ -694,13 +708,28 @@ def approver_allowed(login):
 
 def approvals_dir():
     """Human approvals live outside the factory's state folder, where the agents'
-    sandbox (party-sandbox) can't write: only a person's party-job approve can."""
-    base = Path(os.environ.get("PARTY_APPROVALS") or Path.home() / ".cloudfest-after-party-approvals")
-    return base.expanduser() / PROJECT.slug
+    sandbox (party-sandbox) can't write: only a person's party-job approve can.
+    The home folder comes from the account, not from $HOME or another variable a
+    process could set."""
+    return Path(pwd.getpwuid(os.getuid()).pw_dir) / ".cloudfest-after-party-approvals" / PROJECT.slug
 
 
 def approval_record(job):
+    require(re.fullmatch(r"[A-Za-z0-9-]+", str(job["id"])), f"job id {job['id']!r} isn't valid")
+    require(re.fullmatch(r"[0-9a-f]{40}", str(job.get("reviewed_commit") or "")),
+            f"{job['id']}: no reviewed commit to approve")
     return approvals_dir() / f"{job['id']}-{job['reviewed_commit']}.json"
+
+
+def approved(job):
+    """A person's record for exactly this job, PR and reviewed commit, by an allowed approver."""
+    try:
+        record = json.loads(approval_record(job).read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (isinstance(record, dict) and record.get("job") == job["id"] and record.get("pr") == job["pr"]
+            and record.get("commit") == job["reviewed_commit"]
+            and approver_allowed(str(record.get("approved_by") or "")))
 
 
 def cmd_approve(job):
@@ -709,7 +738,7 @@ def cmd_approve(job):
         die(f"{job['id']} is in {job['stage']}, not awaiting-approval")
     login = operator()
     if not approver_allowed(login):
-        die(f"@{login} isn't one of this project's approvers ({', '.join(CONFIG.get('approvers', []))})")
+        die(f"@{login} isn't one of this project's approvers ({', '.join(approver_names())})")
     confirm_in_terminal(job)
     record = approval_record(job)
     record.parent.mkdir(parents=True, exist_ok=True)
@@ -752,7 +781,7 @@ def cmd_merge(job):
         require_reviewed_head(job)
     except Refused as e:
         return fail(f"The branch changed after review, so nothing was merged.\n\n{e}")
-    if merge_policy() == "human_required" and not approval_record(job).is_file():
+    if merge_policy() == "human_required" and not approved(job):
         die(f"{job['id']}: no approval by a person for {job['reviewed_commit'][:7]}; "
             "run party-job approve in your own terminal")
 

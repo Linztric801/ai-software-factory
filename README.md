@@ -99,9 +99,15 @@ for machine-local overrides. Protected paths can be added, never removed.
 person runs `party-job approve <job>` in their own terminal and types the PR
 number, or merges it on GitHub. Claude can't approve: the command needs a real
 terminal, a guard hook stops Claude from running it or merging PRs directly,
-and the merge requires an approval record that sandboxed agents can't write.
-Set `"merge_policy": "auto_after_approval"` to let the approver agent merge on
-its own. Name who may approve with `"approvers"`.
+and the merge requires an approval record that sandboxed agents can't write,
+for exactly that job, PR and reviewed commit. `merge_policy` and `"approvers"`
+are read from `.factory/config.json` as merged on the base branch, so only a
+reviewed PR can set `"merge_policy": "auto_after_approval"` and let the
+approver agent merge on its own; the machine-local config can only tighten them.
+
+These checks run on your Mac, in the same account as the agents. The hard
+backstop is GitHub: protect the base branch and require a review from a
+person, and the factory can't merge anything nobody approved.
 
 **XP for verified work.** Agents earn XP only when a job they worked on is
 merged: intake 10, spec 15, builder 40 for a first-round merge (25 later),
@@ -113,8 +119,11 @@ to Master. Levels are cosmetic and grant no rights.
 project: the agents' commands may write only to the project, the factory's
 state folder and build caches; can't read SSH keys or cloud credentials; and
 reach only GitHub, the npm registry, Anthropic and the domains you list under
-`"sandbox": {"allowed_domains": [...]}`. GitHub access stays, because the
-builder pushes and opens PRs. `party-sandbox --off` removes it.
+`"sandbox": {"allowed_domains": [...]}` in the committed config. GitHub access
+stays, because the builder pushes and opens PRs. `party-sandbox --off` removes
+it. iOS projects: SwiftPM, Swift macros and the Simulator's test runner start
+their own sandboxes or terminals, which Claude Code's sandbox doesn't allow, so
+`xcodebuild test` fails inside it. Keep the sandbox off for such projects.
 
 ## Safety rules the code enforces
 

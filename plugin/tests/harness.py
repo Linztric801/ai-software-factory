@@ -4,6 +4,8 @@ PATH, and an isolated git and Claude config. The scripts run from plugin/bin."""
 
 import json
 import os
+import shutil
+import pwd
 import subprocess
 import tempfile
 from pathlib import Path
@@ -39,7 +41,6 @@ class Factory:
             "PATH": f"{FAKES}{os.pathsep}{os.environ['PATH']}",
             "FAKE_GH_STATE": str(self.state),
             "PARTY_HOME": str(self.home),
-            "PARTY_APPROVALS": str(self.root / "approvals"),
             "CLAUDE_CONFIG_DIR": str(self.claude),
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
@@ -67,7 +68,12 @@ class Factory:
         self.git(self.repo, "commit", "-q", "-m", "initial")
         self.git(self.repo, "push", "-q", "origin", "main")
 
+    # Approvals live in the account's real home, out of reach of variables; the
+    # test project's folder there is removed after each test.
+    approvals = Path(pwd.getpwuid(os.getuid()).pw_dir) / ".cloudfest-after-party-approvals" / "acme-widgets"
+
     def close(self):
+        shutil.rmtree(self.approvals, ignore_errors=True)
         self._tmp.cleanup()
 
     # ---- processes ----------------------------------------------------------
