@@ -464,6 +464,23 @@ class HumanApproval(FactoryTest):
         self.assertEqual(f.load(self.id)["stage"], "awaiting-approval")
         self.assertEqual(f.calls("pr", "merge"), [])
 
+    def test_a_faked_approval_in_job_state_merges_nothing(self):
+        f = self.f
+        self.park()
+        job = f.load(self.id)
+        job["stage"], job["approved_by"] = "merging", "owner"  # what a rogue agent could write
+        (f.dir(self.id) / "job.json").write_text(json.dumps(job))
+        self.refused("merge", self.id, says="no approval by a person")
+        self.assertEqual(f.calls("pr", "merge"), [])
+
+    def test_approval_leaves_a_record_for_the_reviewed_commit(self):
+        f = self.f
+        self.park()
+        commit = f.load(self.id)["reviewed_commit"]
+        self.assertEqual(f.approve(self.id, "10")[0], 0)
+        record = f.root / "approvals" / "acme-widgets" / f"{self.id}-{commit}.json"
+        self.assertEqual(json.loads(record.read_text())["approved_by"], "owner")
+
     def test_only_a_named_approver_may_approve(self):
         f = self.f
         self.park()
@@ -481,6 +498,12 @@ class HumanApproval(FactoryTest):
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 10 --merge"}, "cwd": str(f.repo)}).returncode, 2)
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr review 10 --approve"}, "cwd": str(f.repo)}).returncode, 2)
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr view 10"}, "cwd": str(f.repo)}).returncode, 0)
+        api_merge = "gh api -X PUT repos/acme/widgets/pulls/10/merge"
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": api_merge}, "cwd": str(f.repo)}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "echo x > ~/.cloudfest-after-party-approvals/a"}}).returncode, 2)
+        sneaky = str(f.repo / "worktrees" / ".." / ".factory" / "config.json")
+        self.assertEqual(guard({"tool_name": "Write", "tool_input": {"file_path": sneaky}}).returncode, 2,
+                         "a worktrees/ substring is not a worktree")
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 10"}, "cwd": str(f.root)}).returncode, 0,
                          "outside a factory project the guard stays out of the way")
         self.assertEqual(guard({"tool_name": "Edit", "tool_input": {"file_path": str(f.dir(self.id) / "job.json")}}).returncode, 2)

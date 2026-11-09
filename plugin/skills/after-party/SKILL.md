@@ -59,6 +59,7 @@ party-gate                                     runs the checks in a worktree →
 party-route                                    risk + surfaces → the job's agents
 party-dashboard [port] [--demo]                the festival dashboard on 127.0.0.1 (run it in the background)
 party-import <old jobs folder>                 one-off: bring over the jobs of an in-repo factory
+party-sandbox [--write|--off]                  Claude Code's sandbox for this project's agents
 <state>/config.json                            optional machine-local overrides
 <state>/jobs/<job-id>/job.json                 the job's state; the dashboard reads it
 <state>/jobs/<job-id>/issue.md                 the issue, quoted as data
@@ -215,8 +216,10 @@ new feature, ask.
 - **A question** (status, cost, why a job escalated, what a reviewer said):
   answer from `party-job summary`, `job.json` and the job's files. Here
   you may read a file in full when the answer is in it.
-- **Approving a parked job** (`awaiting-approval`): run `party-job approve <n>`;
-  it merges the reviewed commit after syncing and running the checks again.
+- **Approving a parked job** (`awaiting-approval`): only a person can. Tell the user
+  to run `party-job approve <n>` in their own terminal; you can't, and a guard
+  blocks it. It merges the reviewed commit after syncing and running the checks again.
+- **XP**: `party-job xp` shows each agent's level and the verified events behind it.
 - **What needs them**: run `party-job queue`. For each `wait` line, say
   what the job is waiting for: the question in `decision.md` for `needs-human`,
   the question in `intake.md` for `needs-info`.

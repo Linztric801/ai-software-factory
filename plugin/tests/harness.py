@@ -39,6 +39,7 @@ class Factory:
             "PATH": f"{FAKES}{os.pathsep}{os.environ['PATH']}",
             "FAKE_GH_STATE": str(self.state),
             "PARTY_HOME": str(self.home),
+            "PARTY_APPROVALS": str(self.root / "approvals"),
             "CLAUDE_CONFIG_DIR": str(self.claude),
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",

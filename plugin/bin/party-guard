@@ -15,7 +15,10 @@ import sys
 from pathlib import Path
 
 APPROVE = re.compile(r"\bparty-job\b[^\n;&|]*\bapprove\b")
-GH_MERGE = re.compile(r"\bgh\s+pr\s+(merge|review\b[^\n;&|]*--approve|review\b[^\n;&|]*\s-a\b)")
+GH_MERGE = re.compile(r"\bgh\s+pr\s+(merge|review\b[^\n;&|]*--approve|review\b[^\n;&|]*\s-a\b)"
+                      r"|\bgh\s+api\b[^\n;&|]*/pulls/[^\s/]+/(merge|reviews)\b"
+                      r"|\bgh\s+api\b[^\n;&|]*\bmergePullRequest\b")
+APPROVALS = re.compile(r"cloudfest-after-party-approvals")
 STATE = re.compile(r"^projects/[^/]+/(jobs/[^/]+/job\.json|config\.json)$")
 
 
@@ -31,6 +34,22 @@ def is_state(path):
         except (ValueError, OSError):
             continue
         if STATE.match(rel.as_posix()):
+            return True
+    return False
+
+
+def in_worktree(path):
+    """Inside a job worktree of the factory's state folder, resolved, not by substring."""
+    homes = {Path.home() / ".cloudfest-after-party"}
+    if os.environ.get("PARTY_HOME"):
+        homes.add(Path(os.environ["PARTY_HOME"]).expanduser())
+    target = Path(path).expanduser().resolve()
+    for home in homes:
+        try:
+            parts = target.relative_to(home.resolve()).parts
+        except ValueError:
+            continue
+        if len(parts) >= 4 and parts[0] == "projects" and parts[2] == "worktrees":
             return True
     return False
 
@@ -61,14 +80,16 @@ def main():
         if APPROVE.search(command):
             block("party-job approve is for a person: they run it in their own terminal. "
                   "Tell the user the job waits for their approval.")
+        if APPROVALS.search(command):
+            block("Approval records are written only by a person's party-job approve.")
         if GH_MERGE.search(command) and factory_project(event.get("cwd") or "."):
             block("In a factory project, PRs merge only through party-job merge or a person's "
                   "party-job approve; don't merge or approve PRs directly.")
     elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         path = str(data.get("file_path") or data.get("notebook_path") or "")
-        if path and is_state(path):
-            block("Job state and factory settings change only through party-job; don't edit them.")
-        if path.endswith("/.factory/config.json") and "/worktrees/" not in path:
+        if path and (is_state(path) or APPROVALS.search(path)):
+            block("Job state, approvals and factory settings change only through party-job; don't edit them.")
+        if path.endswith("/.factory/config.json") and not in_worktree(path):
             block("The project's factory settings are the owner's; change them in a reviewed PR, not here.")
 
 

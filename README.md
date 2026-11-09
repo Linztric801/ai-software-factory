@@ -92,6 +92,30 @@ factory found. Settings are layered: the plugin's `config.default.json`, then
 `.factory/config.json`, then `~/.cloudfest-after-party/projects/<slug>/config.json`
 for machine-local overrides. Protected paths can be added, never removed.
 
+## Approval, XP and the sandbox
+
+**A person approves before anything merges.** With `merge_policy` at
+`human_required` (the default), an approved PR waits at the BierFest until a
+person runs `party-job approve <job>` in their own terminal and types the PR
+number, or merges it on GitHub. Claude can't approve: the command needs a real
+terminal, a guard hook stops Claude from running it or merging PRs directly,
+and the merge requires an approval record that sandboxed agents can't write.
+Set `"merge_policy": "auto_after_approval"` to let the approver agent merge on
+its own. Name who may approve with `"approvers"`.
+
+**XP for verified work.** Agents earn XP only when a job they worked on is
+merged: intake 10, spec 15, builder 40 for a first-round merge (25 later),
+each reviewer 10, approver 10, configurable under `"xp"`. `party-job xp`
+explains every point; the dashboard's Crew view shows levels from New recruit
+to Master. Levels are cosmetic and grant no rights.
+
+**The sandbox.** `party-sandbox --write` turns on Claude Code's sandbox for the
+project: the agents' commands may write only to the project, the factory's
+state folder and build caches; can't read SSH keys or cloud credentials; and
+reach only GitHub, the npm registry, Anthropic and the domains you list under
+`"sandbox": {"allowed_domains": [...]}`. GitHub access stays, because the
+builder pushes and opens PRs. `party-sandbox --off` removes it.
+
 ## Safety rules the code enforces
 
 - Only issues with the `factory` label run, and issue text reaches agents only

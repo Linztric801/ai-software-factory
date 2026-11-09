@@ -692,6 +692,17 @@ def approver_allowed(login):
     return login.lower() in allowed
 
 
+def approvals_dir():
+    """Human approvals live outside the factory's state folder, where the agents'
+    sandbox (party-sandbox) can't write: only a person's party-job approve can."""
+    base = Path(os.environ.get("PARTY_APPROVALS") or Path.home() / ".cloudfest-after-party-approvals")
+    return base.expanduser() / PROJECT.slug
+
+
+def approval_record(job):
+    return approvals_dir() / f"{job['id']}-{job['reviewed_commit']}.json"
+
+
 def cmd_approve(job):
     """A person approves a job the policy parked: then it merges like any approved job."""
     if job["stage"] != "awaiting-approval":
@@ -700,6 +711,10 @@ def cmd_approve(job):
     if not approver_allowed(login):
         die(f"@{login} isn't one of this project's approvers ({', '.join(CONFIG.get('approvers', []))})")
     confirm_in_terminal(job)
+    record = approval_record(job)
+    record.parent.mkdir(parents=True, exist_ok=True)
+    record.write_text(json.dumps({"job": job["id"], "pr": job["pr"], "commit": job["reviewed_commit"],
+                                  "approved_by": login, "at": now()}) + "\n")
     job["approved_by"] = login
     save(advance(sync(job), "merging"))
     print(f"{job['id']}: approved by @{job['approved_by']}")
@@ -737,6 +752,9 @@ def cmd_merge(job):
         require_reviewed_head(job)
     except Refused as e:
         return fail(f"The branch changed after review, so nothing was merged.\n\n{e}")
+    if merge_policy() == "human_required" and not approval_record(job).is_file():
+        die(f"{job['id']}: no approval by a person for {job['reviewed_commit'][:7]}; "
+            "run party-job approve in your own terminal")
 
     reviewed = job["reviewed_commit"]
     git(job, "fetch", "origin", BASE)
