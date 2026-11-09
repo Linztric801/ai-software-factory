@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""PreToolUse guard: keeps Claude from approving or merging on a person's behalf.
+
+Wired in hooks/hooks.json for Bash, Write and Edit. It blocks (exit 2):
+- `party-job approve`: a person approves in their own terminal;
+- in a project with a `.factory/` folder, `gh pr merge` and `gh pr review --approve`:
+  merges happen only through `party-job merge` / `party-job approve`;
+- writes to job state (`job.json`) and factory settings outside job worktrees.
+"""
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+APPROVE = re.compile(r"\bparty-job\b[^\n;&|]*\bapprove\b")
+GH_MERGE = re.compile(r"\bgh\s+pr\s+(merge|review\b[^\n;&|]*--approve|review\b[^\n;&|]*\s-a\b)")
+STATE = re.compile(r"^projects/[^/]+/(jobs/[^/]+/job\.json|config\.json)$")
+
+
+def is_state(path):
+    """job.json and the local config.json in the factory's state folder."""
+    homes = {Path.home() / ".cloudfest-after-party"}
+    if os.environ.get("PARTY_HOME"):
+        homes.add(Path(os.environ["PARTY_HOME"]).expanduser())
+    target = Path(path).expanduser()
+    for home in homes:
+        try:
+            rel = target.resolve().relative_to(home.resolve())
+        except (ValueError, OSError):
+            continue
+        if STATE.match(rel.as_posix()):
+            return True
+    return False
+
+
+def factory_project(cwd):
+    for folder in [Path(cwd), *Path(cwd).parents]:
+        if (folder / ".factory").is_dir():
+            return True
+        if (folder / ".git").exists():
+            return False
+    return False
+
+
+def block(why):
+    print(why, file=sys.stderr)
+    sys.exit(2)
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        return
+    tool = event.get("tool_name", "")
+    data = event.get("tool_input") or {}
+    if tool == "Bash":
+        command = data.get("command", "")
+        if APPROVE.search(command):
+            block("party-job approve is for a person: they run it in their own terminal. "
+                  "Tell the user the job waits for their approval.")
+        if GH_MERGE.search(command) and factory_project(event.get("cwd") or "."):
+            block("In a factory project, PRs merge only through party-job merge or a person's "
+                  "party-job approve; don't merge or approve PRs directly.")
+    elif tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
+        path = str(data.get("file_path") or data.get("notebook_path") or "")
+        if path and is_state(path):
+            block("Job state and factory settings change only through party-job; don't edit them.")
+        if path.endswith("/.factory/config.json") and "/worktrees/" not in path:
+            block("The project's factory settings are the owner's; change them in a reviewed PR, not here.")
+
+
+if __name__ == "__main__":
+    main()

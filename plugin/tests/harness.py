@@ -76,8 +76,40 @@ class Factory:
                               capture_output=True, text=True).stdout
 
     def run(self, script, *args, stdin=None, env=None, cwd=None):
+        # A new session has no controlling terminal: party-job approve must refuse, and
+        # a test run in someone's terminal never prompts them.
         return subprocess.run([str(BIN / f"party-{script}"), *args], cwd=cwd or self.repo,
-                              env={**self.env, **(env or {})}, input=stdin, capture_output=True, text=True)
+                              env={**self.env, **(env or {})}, input=stdin, capture_output=True, text=True,
+                              start_new_session=True)
+
+    def approve(self, job_id, answer):
+        """Run party-job approve with a real terminal, typing `answer` at its prompt."""
+        import os
+        import pty
+        import select
+        path = str(BIN / "party-job")
+        pid, master = pty.fork()  # the child gets the pty as its controlling terminal
+        if pid == 0:
+            os.chdir(self.repo)
+            os.execve(path, [path, "approve", job_id], self.env)
+        out, sent = b"", False
+        while True:
+            ready, _, _ = select.select([master], [], [], 60)
+            if not ready:
+                break
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            out += chunk
+            if not sent and b"Type the PR number" in out:
+                os.write(master, f"{answer}\n".encode())
+                sent = True
+        _, status = os.waitpid(pid, 0)
+        os.close(master)
+        return os.waitstatus_to_exitcode(status), out.decode(errors="replace")
 
     def job(self, *args, **kw):
         return self.run("job", *args, **kw)

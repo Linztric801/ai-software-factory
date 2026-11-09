@@ -14,6 +14,7 @@ from collections import Counter
 from html import escape
 from pathlib import Path
 
+import xp
 from pixel import (bubble, box, chibi, cloud, cls, css_classes, css_tokens, nametag, rect,
                    sprite_at, status_marker, text, tip, tip_rule)
 
@@ -594,10 +595,32 @@ def regions(jobs, settings, theme, project, demo=False):
         + "</section>" for name, stages in columns)
     quests = board if jobs else '<p class="empty">No quests yet. Label an issue <code>factory</code> and run <code>/cloudfest:after-party run</code>.</p>'
 
+    events = xp.ledger(jobs, settings)
+    standing = xp.standing(events, settings)
+
+    def level_bar(k):
+        st = standing[k]
+        if st["next"]:
+            fill = (st["xp"] - st["floor"]) / (st["next"] - st["floor"])
+            label = f'{st["xp"]} XP, {st["next"] - st["xp"]} to {st["next_title"]}'
+        else:
+            fill, label = 1, f'{st["xp"]} XP, top level'
+        return (f'<span class="crew-level">Level {st["level"]}, {escape(st["title"])}</span>'
+                f'<span class="xp" role="meter" aria-valuemin="{st["floor"]}" aria-valuemax="{st["next"] or st["xp"]}" '
+                f'aria-valuenow="{st["xp"]}" aria-label="{escape(label)}"><span style="--fill: {fill:.2f}"></span></span>'
+                f'<span class="crew-xp num">{escape(label)}</span>')
     crew = "".join(
         f'<li class="crew-card"><svg class="px crew-svg" viewBox="0 0 14 18" role="img" aria-label="{escape(name)}">{chibi(**kw)}</svg>'
-        f'<span class="crew-name">{escape(name)}</span><span class="crew-role">{escape(world["agents"][k]["state"])}</span></li>'
+        f'<span class="crew-name">{escape(name)}</span><span class="crew-role">{escape(world["agents"][k]["state"])}</span>'
+        f'{level_bar(k)}</li>'
         for k, (name, role, kw) in AGENT.items())
+    ledger_rows = "".join(
+        f'<tr><td>{escape((e["at"] or "")[:10])}</td><td>{escape(AGENT[e["agent"]][0])}</td><td>{escape(e["reason"])}</td>'
+        f'<td class="num">+{e["xp"]}</td></tr>' for e in reversed(events[-8:]))
+    ledger = (f'<table class="ledger"><caption>Latest XP, each from a merged job. Levels are cosmetic and grant no rights.</caption>'
+              f'<thead><tr><th scope="col">Date</th><th scope="col">Agent</th><th scope="col">Verified event</th>'
+              f'<th scope="col" class="num">XP</th></tr></thead><tbody>{ledger_rows}</tbody></table>' if events else
+              '<p class="empty">No XP yet: agents earn it when a job they worked on is merged.</p>')
     people = "".join(
         f'<li class="crew-card host-card"><svg class="px crew-svg" viewBox="0 0 14 18" role="img" aria-label="{escape(p["name"])}">{chibi(**p["sprite"])}</svg>'
         f'<span class="crew-name">{escape(p["name"])}</span><span class="crew-role">{escape(p["role"])}</span></li>'
@@ -616,7 +639,9 @@ def regions(jobs, settings, theme, project, demo=False):
         "r-stage": stage_scene(world, theme),
         "r-bierfest": bierfest,
         "r-quests": quests,
-        "r-crew": f'<ul class="crew">{crew}</ul><h3 class="hosts-h">The people</h3><ul class="crew hosts">{people}</ul>' if people else f'<ul class="crew">{crew}</ul>',
+        "r-crew": (f'<ul class="crew">{crew}</ul>'
+                   + (f'<h3 class="hosts-h">The people</h3><ul class="crew hosts">{people}</ul>' if people else "")
+                   + ledger),
         "r-suite": suite_scene(world, theme),
         "r-ops": ops,
         "r-popup": popup,

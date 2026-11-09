@@ -434,7 +434,8 @@ class HumanApproval(FactoryTest):
         f = self.f
         self.park()
         reviewed = f.load(self.id)["reviewed_commit"]
-        out = f.ok("job", "approve", self.id)
+        code, out = f.approve(self.id, "10")
+        self.assertEqual(code, 0, out)
         self.assertIn("approved by @owner", out)
         self.assertIn("merged PR #10", out)
         job = f.load(self.id)
@@ -448,8 +449,43 @@ class HumanApproval(FactoryTest):
         wt = Path(f.load(self.id)["worktree"])
         (wt / "app.txt").write_text("unreviewed\n")
         f.git(wt, "commit", "-q", "-am", "sneak in")
-        self.refused("approve", self.id, says="moved since review")
+        code, out = f.approve(self.id, "10")
+        self.assertNotEqual(code, 0)
+        self.assertIn("moved since review", out)
         self.assertEqual(f.calls("pr", "merge"), [])
+
+    def test_approval_needs_a_person_at_a_terminal(self):
+        f = self.f
+        self.park()
+        self.refused("approve", self.id, says="approve in your own terminal")
+        code, out = f.approve(self.id, "11")
+        self.assertNotEqual(code, 0)
+        self.assertIn("not confirmed", out)
+        self.assertEqual(f.load(self.id)["stage"], "awaiting-approval")
+        self.assertEqual(f.calls("pr", "merge"), [])
+
+    def test_only_a_named_approver_may_approve(self):
+        f = self.f
+        self.park()
+        (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "human_required", "approvers": ["stefan"]}))
+        self.refused("approve", self.id, says="@owner isn't one of this project's approvers")
+
+    def test_the_guard_stops_claude_from_approving_or_merging(self):
+        f = self.f
+
+        def guard(event):
+            return subprocess.run([str(BIN / "party-guard")], input=json.dumps(event), capture_output=True,
+                                  text=True, env=f.env)
+        (f.repo / ".factory").mkdir(exist_ok=True)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": f"party-job approve {self.id}"}}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 10 --merge"}, "cwd": str(f.repo)}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr review 10 --approve"}, "cwd": str(f.repo)}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr view 10"}, "cwd": str(f.repo)}).returncode, 0)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 10"}, "cwd": str(f.root)}).returncode, 0,
+                         "outside a factory project the guard stays out of the way")
+        self.assertEqual(guard({"tool_name": "Edit", "tool_input": {"file_path": str(f.dir(self.id) / "job.json")}}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Write", "tool_input": {"file_path": str(f.repo / ".factory" / "config.json")}}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Write", "tool_input": {"file_path": str(f.state_dir / "worktrees" / "x" / ".factory" / "config.json")}}).returncode, 0)
 
     def test_feedback_or_reject_instead_of_approving(self):
         f = self.f
@@ -753,6 +789,47 @@ class Import(FactoryTest):
         self.assertEqual(f.new_job(70, "Next thing"), "042-next-thing")
 
 
+class XP(unittest.TestCase):
+    """XP comes only from merged jobs, once per job and agent, by explainable rules."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(BIN.parent / "lib"))
+        import xp
+        cls.xp = xp
+
+    def job(self, i, stage, rnd=1, reviewers=("code", "ui")):
+        return {"id": f"{i:03d}-x", "issue": i, "pr": 100 + i, "stage": stage, "round": rnd,
+                "agents": {"reviewers": {r: "sonnet" for r in reviewers}}, "ended": f"2026-11-0{i}T00:00:00Z"}
+
+    def test_only_merged_jobs_pay_and_each_job_pays_each_agent_once(self):
+        jobs = [self.job(1, "merged"), self.job(2, "rejected"), self.job(3, "build"),
+                self.job(4, "needs-human"), self.job(1, "merged")]  # the same job twice
+        events = self.xp.ledger(jobs)
+        self.assertEqual({e["job"] for e in events}, {"001-x"})
+        keys = [e["key"] for e in events]
+        self.assertEqual(len(keys), len(set(keys)), "no duplicate rewards")
+        self.assertEqual({e["agent"]: e["xp"] for e in events},
+                         {"intake": 10, "spec": 15, "builder": 40, "code": 10, "ui": 10, "approver": 10})
+
+    def test_more_rounds_pay_the_builder_less(self):
+        e = {x["agent"]: x["xp"] for x in self.xp.ledger([self.job(1, "merged", rnd=3)])}
+        self.assertEqual(e["builder"], 25)
+
+    def test_rules_and_levels_come_from_settings(self):
+        settings = {"xp": {"rules": {"builder_first_round": 100}, "levels": [[0, "Rookie"], [100, "Pro"]]}}
+        events = self.xp.ledger([self.job(1, "merged")], settings)
+        st = self.xp.standing(events, settings)
+        self.assertEqual((st["builder"]["xp"], st["builder"]["title"], st["builder"]["next"]), (100, "Pro", None))
+        self.assertEqual((st["security"]["xp"], st["security"]["title"]), (0, "Rookie"))
+
+    def test_levels_follow_the_thresholds(self):
+        events = self.xp.ledger([self.job(i, "merged") for i in range(1, 9)])  # 8 merges
+        st = self.xp.standing(events)["builder"]
+        self.assertEqual((st["xp"], st["level"], st["title"], st["next"]), (320, 3, "Specialist", 500))
+
+
 class Dashboard(FactoryTest):
     def serve(self, *args):
         import socket
@@ -806,6 +883,8 @@ class Dashboard(FactoryTest):
         body = self.get(port, "/")[1].decode()
         self.assertIn('class="mock-flag">Demo<', body)
         self.assertIn("Christian needs you at the BierFest", body)
+        self.assertIn("Level", body)
+        self.assertIn("Latest XP, each from a merged job", body)
         self.assertIn("Yusuf and Stefan", body)
         self.assertEqual(self.get(port, "/jobs/001-demo/job.json")[0], 404, "demo serves no job files")
 

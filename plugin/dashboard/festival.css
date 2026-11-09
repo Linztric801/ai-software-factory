@@ -237,3 +237,7 @@ body:has(.view:target:not(#world)) .popup { display: none; }
 .alert-body .approvals a { color: var(--color-accent); }
 .tip { display: none; }
 .tab-count:empty { display: none; }
+.crew-level { font-size: var(--text-xs); font-weight: 600; color: var(--color-live); margin-block-start: var(--space-xs); }
+.crew-card .xp { width: 100%; margin-block: var(--space-2xs); background: var(--color-night-rule); }
+.crew-xp { font-size: var(--text-xs); color: var(--color-night-muted); }
+.ledger { margin-block-start: var(--space-xl); }

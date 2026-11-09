@@ -21,6 +21,7 @@ Usage:
   party-job agents <job> <json>        record the routed agent set (called by party-route)
   party-job sync <job>                 refresh reviews, gate and cost from the job's files
   party-job summary [<job>...]         table of jobs: issue, stage, PR, cost, time
+  party-job xp                         XP rules, each agent's level, and the latest verified XP events
 
 <job> is a job id (004-dark-mode) or an issue number (12).
 """
@@ -654,11 +655,52 @@ def merge_policy():
     return policy
 
 
+def confirm_in_terminal(job):
+    """Approval needs a person at a terminal: Claude's tool calls have none."""
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        die("approve in your own terminal: party-job approve asks a person to confirm")
+    try:
+        os.write(fd, f"Approve and merge PR #{job['pr']} ({job['title']})? Type the PR number to confirm: ".encode())
+        line = b""
+        while not line.endswith(b"\n"):
+            chunk = os.read(fd, 1)
+            if not chunk:
+                break
+            line += chunk
+    finally:
+        os.close(fd)
+    answer = line.decode(errors="replace").strip().lstrip("#")
+    if answer != str(job["pr"]):
+        die("not confirmed; nothing was approved")
+
+
+def approver_allowed(login):
+    """With approvers named in the settings, only their GitHub accounts may approve."""
+    names = CONFIG.get("approvers") or []
+    if not names:
+        return True
+    allowed = {n.lower() for n in names}
+    try:
+        sys.path.insert(0, str(BIN.parent / "lib"))
+        import world
+        people = world.load_theme(CONFIG.get("theme", "cloudfest")).get("people", {})
+        allowed |= {people[n]["github"].lower() for n in names if people.get(n, {}).get("github")}
+    except (ValueError, OSError, KeyError):
+        pass
+    return login.lower() in allowed
+
+
 def cmd_approve(job):
     """A person approves a job the policy parked: then it merges like any approved job."""
     if job["stage"] != "awaiting-approval":
         die(f"{job['id']} is in {job['stage']}, not awaiting-approval")
-    job["approved_by"] = operator()
+    login = operator()
+    if not approver_allowed(login):
+        die(f"@{login} isn't one of this project's approvers ({', '.join(CONFIG.get('approvers', []))})")
+    confirm_in_terminal(job)
+    job["approved_by"] = login
     save(advance(sync(job), "merging"))
     print(f"{job['id']}: approved by @{job['approved_by']}")
     cmd_merge(job)
@@ -788,6 +830,18 @@ def cmd_where():
     print("no new    " + ", ".join(CONFIG.get("protected_new_paths", [])))
 
 
+def cmd_xp():
+    import xp
+    events = xp.ledger(all_jobs(), CONFIG)
+    rules = {**xp.DEFAULT_RULES, **CONFIG.get("xp", {}).get("rules", {})}
+    print("rules     " + ", ".join(f"{k} {v}" for k, v in rules.items()))
+    for agent, st in sorted(xp.standing(events, CONFIG).items(), key=lambda kv: -kv[1]["xp"]):
+        nxt = f", {st['next'] - st['xp']} to {st['next_title']}" if st["next"] else ", top level"
+        print(f"{agent:<9} {st['xp']:>5} XP  level {st['level']}, {st['title']}{nxt}")
+    for e in events[-10:]:
+        print(f"+{e['xp']:<3} {e['agent']:<9} {e['reason']} ({e['key']})")
+
+
 def main(argv):
     if not argv or argv[0] in {"-h", "--help"}:
         print(__doc__.strip())
@@ -819,6 +873,8 @@ def main(argv):
             save(job)
             reviews = " ".join(f"{k}:{v}" for k, v in job["reviews"].items())
             print(f"{job['id']}: {job['stage']} round {job['round']} gate {job['gate'] or '-'} {reviews}".rstrip())
+        elif cmd == "xp" and not args:
+            cmd_xp()
         elif cmd == "summary":
             cmd_summary(args)
         else:
