@@ -565,6 +565,17 @@ class HumanApproval(FactoryTest):
             self.refused("merge", self.id, says="no approval by a person")
         self.assertEqual(f.calls("pr", "merge"), [])
 
+    def test_a_local_list_without_a_committed_approver_lets_nobody_approve(self):
+        f = self.f
+        config = json.loads((f.repo / ".factory" / "config.json").read_text())
+        config["approvers"] = ["owner"]
+        (f.repo / ".factory" / "config.json").write_text(json.dumps(config))
+        f.git(f.repo, "commit", "-qam", "approvers")
+        f.git(f.repo, "push", "-q", "origin", "main")
+        self.park()
+        (f.state_dir / "config.json").write_text(json.dumps({"merge_policy": "human_required", "approvers": ["stefan"]}))
+        self.refused("approve", self.id, says="@owner isn't one of this project's approvers")
+
     def test_the_local_config_cant_switch_off_human_approval(self):
         f = self.f
         config = json.loads((f.repo / ".factory" / "config.json").read_text())

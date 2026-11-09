@@ -51,6 +51,13 @@ def main(args):
 
     if kind == "api" and verb == "user":
         out = state["user"]
+    elif kind == "api" and args[-1].startswith("repos/") and "/contents/" in args[-1]:
+        path, ref = args[-1].split("/contents/", 1)[1].split("?ref=")
+        res = subprocess.run(["git", f"--git-dir={os.environ['FAKE_GH_ORIGIN']}", "show", f"{ref}:{path}"],
+                             capture_output=True, text=True)
+        out = res.stdout if res.returncode == 0 else fail("HTTP 404: Not Found")
+    elif kind == "api" and verb.startswith("repos/"):
+        out = json.dumps({"default_branch": "main"})
     elif kind == "issue" and verb == "view":
         issue = issues.get(args[2]) or fail(f"no issue {args[2]}")
         out = json.dumps(pick(issue, opt(args, "--json")))

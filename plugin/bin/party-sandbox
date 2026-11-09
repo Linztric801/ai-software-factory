@@ -30,8 +30,7 @@ from party import Project, home  # noqa: E402
 DOMAINS = ["github.com", "api.github.com", "codeload.github.com", "*.githubusercontent.com",
            "registry.npmjs.org", "*.npmjs.org", "api.anthropic.com"]
 WRITABLE = ["~/Library/pnpm", "~/.local/share/pnpm", "~/.cache", "~/Library/Caches",
-            "~/Library/Developer", "~/Library/Logs/CoreSimulator", "~/Library/org.swift.swiftpm",
-            "/tmp", "/private/tmp", "/var/folders", "/private/var/folders"]  # Xcode's temp and caches
+            "~/Library/Developer", "/tmp", "/private/tmp"]
 SECRETS = ["~/.ssh", "~/.aws", "~/.config/gcloud", "~/.azure", "~/.kube", "~/.docker/config.json", "~/.netrc"]
 
 
@@ -59,10 +58,7 @@ def profile(project):
         "network": {
             "allowedDomains": DOMAINS + extra,
             "allowLocalBinding": True,                       # dev servers for UI checks
-            "allowUnixSockets": ["/private/var/tmp", "/var/tmp"],  # the simulator's test runner
-            "allowMachLookup": ["com.apple.CoreSimulator.*", "com.apple.coresimulator.*",  # the iOS simulator
-                                "com.apple.dt.*",
-                                "com.apple.SecurityServer", "com.apple.securityd.xpc",  # gh's keychain login
+            "allowMachLookup": ["com.apple.SecurityServer", "com.apple.securityd.xpc",  # gh's keychain login
                                 "com.apple.trustd", "com.apple.trustd.agent"],          # TLS checks for gh and git
         },
     }

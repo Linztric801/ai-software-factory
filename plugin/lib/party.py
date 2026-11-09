@@ -94,18 +94,29 @@ class Project:
         self.checks = self.repo / config.get("checks", ".factory/checks.sh")
 
     def committed_config(self):
-        """The plugin's defaults and the project's .factory/config.json as merged on the
-        base branch: settings an agent can't change without a reviewed PR. Without a
-        readable copy, the defaults alone (human approval)."""
-        base = self.config.get("base_branch", "main")
-        res = subprocess.run(["git", "-C", str(self.repo), "show", f"origin/{base}:.factory/config.json"],
-                             capture_output=True, text=True)
-        try:
-            committed = json.loads(res.stdout) if res.returncode == 0 else {}
-        except json.JSONDecodeError:
+        """The plugin's defaults and the project's .factory/config.json on GitHub's default
+        branch: settings an agent can't change without a reviewed PR. Read from GitHub,
+        not from local refs or local settings, which the agents' sandbox can write.
+        Unreadable, the defaults alone (human approval)."""
+        if getattr(self, "_committed", None) is None:
             committed = {}
-        return merge(_read(DEFAULTS), committed if isinstance(committed, dict) else {})
-
+            res = subprocess.run(["git", "config", "--get", "remote.origin.url"], cwd=self.repo,
+                                 capture_output=True, text=True)
+            m = re.search(r"github\.[a-z]+[/:]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$", res.stdout.strip())
+            if m:
+                api = f"repos/{m.group(1)}/{m.group(2)}"
+                try:
+                    repo = subprocess.run(["gh", "api", api], capture_output=True, text=True)
+                    branch = json.loads(repo.stdout)["default_branch"] if repo.returncode == 0 else None
+                    raw = subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json",
+                                          f"{api}/contents/.factory/config.json?ref={branch}"],
+                                         capture_output=True, text=True) if branch else None
+                    if raw and raw.returncode == 0:
+                        committed = json.loads(raw.stdout)
+                except (OSError, ValueError, KeyError, TypeError):
+                    committed = {}
+            self._committed = merge(_read(DEFAULTS), committed if isinstance(committed, dict) else {})
+        return self._committed
 
 def project_of_job_folder(job_folder):
     """The project a job folder belongs to, from the repo its job.json records."""

@@ -661,12 +661,13 @@ def merge_policy():
 
 
 def approver_names():
-    """Approvers from the committed config; the local config may only narrow them."""
+    """Approvers from the committed config; the local config may only narrow them.
+    None: anyone may approve. An empty list: nobody may."""
     committed = PROJECT.committed_config().get("approvers") or []
     local = CONFIG.get("approvers") or []
     if committed and local:
         return [n for n in committed if n in local]
-    return committed or local
+    return (committed or local) or None
 
 
 def confirm_in_terminal(job):
@@ -693,7 +694,7 @@ def confirm_in_terminal(job):
 def approver_allowed(login):
     """With approvers named in the settings, only their GitHub accounts may approve."""
     names = approver_names()
-    if not names:
+    if names is None:
         return True
     allowed = {n.lower() for n in names}
     try:
@@ -738,7 +739,7 @@ def cmd_approve(job):
         die(f"{job['id']} is in {job['stage']}, not awaiting-approval")
     login = operator()
     if not approver_allowed(login):
-        die(f"@{login} isn't one of this project's approvers ({', '.join(approver_names())})")
+        die(f"@{login} isn't one of this project's approvers ({', '.join(approver_names() or [])})")
     confirm_in_terminal(job)
     record = approval_record(job)
     record.parent.mkdir(parents=True, exist_ok=True)

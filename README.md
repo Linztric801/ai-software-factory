@@ -101,7 +101,7 @@ number, or merges it on GitHub. Claude can't approve: the command needs a real
 terminal, a guard hook stops Claude from running it or merging PRs directly,
 and the merge requires an approval record that sandboxed agents can't write,
 for exactly that job, PR and reviewed commit. `merge_policy` and `"approvers"`
-are read from `.factory/config.json` as merged on the base branch, so only a
+are read from `.factory/config.json` on GitHub's default branch (through `gh api`), so only a
 reviewed PR can set `"merge_policy": "auto_after_approval"` and let the
 approver agent merge on its own; the machine-local config can only tighten them.
 
