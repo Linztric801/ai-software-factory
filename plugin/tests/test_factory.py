@@ -495,6 +495,9 @@ class HumanApproval(FactoryTest):
                                   text=True, env=f.env)
         (f.repo / ".factory").mkdir(exist_ok=True)
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": f"party-job approve {self.id}"}}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": f"cd x && party-job approve {self.id}"}}).returncode, 2)
+        self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": f"party-job advance {self.id} approve"}}).returncode, 0,
+                         "the review -> approve step is the orchestrator's")
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr merge 10 --merge"}, "cwd": str(f.repo)}).returncode, 2)
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr review 10 --approve"}, "cwd": str(f.repo)}).returncode, 2)
         self.assertEqual(guard({"tool_name": "Bash", "tool_input": {"command": "gh pr view 10"}, "cwd": str(f.repo)}).returncode, 0)

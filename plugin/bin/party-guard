@@ -14,7 +14,10 @@ import re
 import sys
 from pathlib import Path
 
-APPROVE = re.compile(r"\bparty-job\b[^\n;&|]*\bapprove\b")
+# `party-job approve <id>` only: `party-job advance <id> approve` is the
+# orchestrator's step from review to the approver, which party-job itself
+# allows only when every review passed on the reviewed commit.
+APPROVE = re.compile(r"\bparty-job\s+approve\b")
 GH_MERGE = re.compile(r"\bgh\s+pr\s+(merge|review\b[^\n;&|]*--approve|review\b[^\n;&|]*\s-a\b)"
                       r"|\bgh\s+api\b[^\n;&|]*/pulls/[^\s/]+/(merge|reviews)\b"
                       r"|\bgh\s+api\b[^\n;&|]*\bmergePullRequest\b")
